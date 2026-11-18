@@ -3,6 +3,15 @@ Official C# mathematics, geometry, and physics simulation library for QUANTUM DY
 
 Licensed under the [MIT License](LICENSE).
 
+The owner-approved spline, easing, timeline, heartline, and constrained smoothing
+foundation is documented in [Spline and timeline mathematics](docs/SplineTimelineFoundation.md),
+including C# examples, numerical conventions, diagnostics, and implementation limits.
+
+The owner-approved [physical rail geometry foundation](docs/PhysicalRailGeometryFoundation.md)
+adds configurable rail arrangements and cross-sections, analytic offset geometry,
+independent spine/rail distances, explicit spacing/gauge measurements, and continuity
+diagnostics. Physical motion remains the responsibility of the existing dynamics solvers.
+
 ## Development infrastructure
 
 `QuantumDynamixLib.sln` contains one `net10.0` core class library and one MSTest
