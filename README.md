@@ -3,6 +3,29 @@ Official C# mathematics, geometry, and physics simulation library for QUANTUM DY
 
 Licensed under the [MIT License](LICENSE).
 
+## Current capabilities
+
+Implemented in the current library:
+
+- **Double-precision mathematics:** vectors, 3x3 matrices, Hamilton quaternions,
+  and rigid poses in right-handed coordinates.
+- **Splines and heartline geometry:** scalar and spatial B-splines/NURBS,
+  analytic derivatives, curvature, arc-length mapping, rotation-minimizing frames,
+  banking, and derived track-spine offsets.
+- **Profiles and fitting:** easing functions, time/distance timelines,
+  feature-relative anchors, constrained fitting, and nondestructive smoothing.
+- **Physical rail geometry:** custom rail arrangements and cross-sections,
+  section roll, surface queries, explicit spacing/gauge measurements, independent
+  spine/rail distance maps, and geometric diagnostics.
+- **Dynamics foundations:** unconstrained Newton-Euler rigid-body dynamics with
+  RK4 integration, plus spherical-joint multibody dynamics and projected
+  implicit-midpoint integration.
+
+Future application functionality, including FVD reconstruction, wheel/rail contact
+and guidance, complete coaster simulation, train animation, rendering, and UI,
+is not implemented here. Rail geometry queries do not advance vehicles or apply
+contact forces.
+
 The owner-approved spline, easing, timeline, heartline, and constrained smoothing
 foundation is documented in [Spline and timeline mathematics](docs/SplineTimelineFoundation.md),
 including C# examples, numerical conventions, diagnostics, and implementation limits.
@@ -11,6 +34,186 @@ The owner-approved [physical rail geometry foundation](docs/PhysicalRailGeometry
 adds configurable rail arrangements and cross-sections, analytic offset geometry,
 independent spine/rail distances, explicit spacing/gauge measurements, and continuity
 diagnostics. Physical motion remains the responsibility of the existing dynamics solvers.
+
+## Quick start
+
+Install a stable .NET 10 SDK compatible with `global.json` (currently selecting
+10.0.400 in the 10.0.4xx feature band; see [SDK and editor compatibility](#sdk-and-editor-compatibility)).
+From the repository root, build the library and run the MSTest suite:
+
+```powershell
+dotnet build QuantumDynamixLib.sln --configuration Debug
+dotnet test QuantumDynamixLib.sln --configuration Debug
+```
+
+To try the library from another .NET 10 project, these commands create a sibling
+console project and reference the core library directly:
+
+```powershell
+dotnet new console --name QuantumDynamixDemo --output ../QuantumDynamixDemo --framework net10.0
+dotnet add ../QuantumDynamixDemo/QuantumDynamixDemo.csproj reference ./QuantumDynamixLib.csproj
+```
+
+Replace the generated `Program.cs` with any one complete C# example below, then run
+it from the repository root:
+
+```powershell
+dotnet run --project ../QuantumDynamixDemo/QuantumDynamixDemo.csproj
+```
+
+For an existing project, use its `.csproj` path in the `dotnet add ... reference`
+command. Only `QuantumDynamixLib.csproj` is needed; the subsystem folders are part
+of that single assembly. See [Development infrastructure](#development-infrastructure)
+for Release builds, formatting checks, and editor setup.
+
+## Usage examples
+
+Each block is an independent console program. Geometry inputs below are
+illustrative caller-supplied values in metres, not library defaults or
+manufacturer dimensions. `Vector3d` stores numbers without attaching units;
+callers must use consistent units.
+
+### Vector mathematics
+
+Subtract two positions to find their displacement, measure its length, and
+normalize it to obtain a unit direction. A dot product with a unit axis gives
+the displacement along that axis. These operations help measure track-point
+separation and resolve directions in engineering calculations.
+
+```csharp
+using System;
+using QuantumDynamix.Math;
+
+var start = new Vector3d(1, 2, 0);
+var end = new Vector3d(4, 6, 0);
+Vector3d displacement = end - start;
+double distance = displacement.Length;
+Vector3d direction = displacement.Normalized();
+double alongX = Vector3d.Dot(displacement, Vector3d.UnitX);
+Vector3d midpoint = start + displacement * 0.5;
+
+Console.WriteLine($"Straight-line distance: {distance:F1} m");
+Console.WriteLine($"Unit direction: ({direction.X:F1}, {direction.Y:F1}, {direction.Z:F1})");
+Console.WriteLine($"Displacement along X: {alongX:F1} m");
+Console.WriteLine($"Midpoint: {midpoint}");
+```
+
+Here the displacement is `(3, 4, 0)` m, its length is 5 m, and the unit direction
+is `(0.6, 0.8, 0)`. This is a straight-line distance, not distance along a curved
+track. Normalizing a zero vector throws because it has no direction.
+
+### Spline and heartline geometry
+
+Create a cubic curve with four control points, measure its heartline length,
+and evaluate a derived spine halfway along that length. This separates the
+authored heartline from an offset track spine, which is useful when reasoning
+about banking and heartline-relative geometry.
+
+```csharp
+using System;
+using QuantumDynamix.Geometry;
+using QuantumDynamix.Math;
+using QuantumDynamix.Splines.Curves;
+using QuantumDynamix.Track;
+
+var heartline = SplineCurve3d.Clamped(new[]
+{
+    new Vector3d(0, 0, 0), new Vector3d(5, 0, 0),
+    new Vector3d(10, 5, 0), new Vector3d(10, 10, 0)
+}, degree: 3);
+
+var stations = new ArcLengthMap(heartline);
+var offsets = TrackOffsetProfile.Constant(new Vector3d(0, 0, -1), stations.Length);
+var track = new HeartlineTrack(heartline, Vector3d.UnitZ, offsets);
+HeartlineTrackSample sample = track.Evaluate(stations.Length / 2);
+
+Console.WriteLine($"Curve at u=0.5: {heartline.Evaluate(0.5).Position}");
+Console.WriteLine($"Heartline length: {stations.Length:F3} m");
+Console.WriteLine($"Heartline at half length: {sample.HeartlinePosition}");
+Console.WriteLine($"Spine at half heartline length: {sample.SpinePosition}");
+```
+
+`degree: 3` explicitly selects a cubic; the spatial factory otherwise defaults
+to degree five. Control points shape the curve and generally are not points it
+passes through. The clamped parameter `u` ranges from 0 to 1 and is not a distance;
+`HeartlineTrack.Evaluate` instead accepts heartline station in metres.
+
+This example explicitly chooses initial up as +Z and an offset of -1 m along the
+banked up axis. Omitted banking means zero bank. The spine position is a geometric
+offset, not a vehicle trajectory. See [Heartline and track spine](docs/SplineTimelineFoundation.md#heartline-and-track-spine)
+for varying offsets, banking, frames, and numerical limits.
+
+### Custom physical rails and independent distances
+
+Define two rails around a quarter-circle heartline and query a rail's position
+and curvature. Each rail gets its own distance map, so the inside and outside
+paths can have different lengths. This is useful for measuring rail geometry
+without assuming that heartline, spine, and rail stations are interchangeable.
+
+```csharp
+using System;
+using QuantumDynamix.Geometry;
+using QuantumDynamix.Math;
+using QuantumDynamix.Math.Functions;
+using QuantumDynamix.Splines.Curves;
+using QuantumDynamix.Track;
+
+// Rational quadratic: a quarter circle of radius 10 m.
+var heartline = SplineCurve3d.Clamped(new[]
+{
+    new Vector3d(10, 0, 0), new Vector3d(10, 10, 0), new Vector3d(0, 10, 0)
+}, degree: 2, weights: new[] { 1, System.Math.Sqrt(0.5), 1 });
+double length = new ArcLengthMap(heartline).Length;
+var track = new HeartlineTrack(heartline, Vector3d.UnitZ,
+    TrackOffsetProfile.Constant(new Vector3d(0, 1, 0), length));
+
+// Minimal open section boundary in local X=0, not a manufactured rail profile.
+var boundary = SplineCurve3d.Clamped(new[]
+{
+    new Vector3d(0, -0.1, 0), new Vector3d(0, 0.1, 0)
+}, degree: 1);
+var section = new RailCrossSection(new[] { boundary });
+var zeroRoll = new CustomFunction(0, length, (_, _) => new ScalarJet(0));
+var arrangement = new RailArrangement(new[]
+{
+    new RailDefinition("inner",
+        TrackOffsetProfile.Constant(new Vector3d(0, 0.5, 0), length), section, zeroRoll),
+    new RailDefinition("outer",
+        TrackOffsetProfile.Constant(new Vector3d(0, -0.5, 0), length), section, zeroRoll)
+});
+
+// Numerical controls from RailTestFixtures, not engineering acceptance criteria.
+var settings = new RailValidationSettings(
+    positionTolerance: 1e-8, angularTolerance: 1e-7, curvatureTolerance: 1e-7,
+    stationDerivativeTolerance: 1e-7, minimumSpeedRatio: 1e-10, minimumFrameProjection: 1e-8);
+var rails = new RailGeometry(track, arrangement, settings);
+double heartlineStation = length / 2;
+RailSample sample = rails.Evaluate("inner", heartlineStation);
+TrackDistanceMap spine = rails.CreateSpineDistanceMap();
+TrackDistanceMap inner = rails.CreateRailDistanceMap("inner");
+TrackDistanceMap outer = rails.CreateRailDistanceMap("outer");
+
+Console.WriteLine($"Inner rail position: {sample.Position}");
+Console.WriteLine($"Inner rail curvature: {sample.Curvature:F6} 1/m");
+Console.WriteLine($"Spine / inner / outer lengths: {spine.Length:F3} / {inner.Length:F3} / {outer.Length:F3} m");
+Console.WriteLine($"Inner rail station: {inner.StationAtHeartlineStation(heartlineStation):F3} m");
+```
+
+The weights represent the circular arc exactly; its distance map is evaluated
+numerically. Offsets use `(forward, left, up)` components in the banked heartline
+frame. Rail offsets are relative to the spine: its 1 m inward offset and the
+rails' +0.5 m and -0.5 m offsets produce radii of 8.5 m and 9.5 m. Their lengths
+are approximately 13.352 m and 14.923 m, while the spine length is 14.137 m.
+
+`zeroRoll` explicitly supplies a constant section roll of zero radians; the
+callback returns a scalar value with zero derivatives. All profiles cover the
+complete heartline distance range. The settings above reproduce existing
+[regression-fixture controls](QuantumDynamix.Tests/RailTestFixtures.cs), not
+recommended coaster tolerances. Constructing `RailGeometry` does not run its
+separate `Validate()` inspection. See [Physical rail geometry](docs/PhysicalRailGeometryFoundation.md)
+for validation units and limits, surface queries, gauge datums, distance inversion,
+and caller-defined profiles. This example defines geometry only; it does not
+model wheel/rail contact or guide a vehicle.
 
 ## Development infrastructure
 
@@ -377,7 +580,9 @@ reduction when halving h, with bands allowing higher-order terms and finite
 reference error. Unit-scale analytic dynamics comparisons use roughly
 `1e-15` to `3e-14` component tolerances for floating-point roundoff.
 
-No contact, rail guidance, splines, trains, graphics, or application-specific
-gravity/friction is implemented. Useful mathematical references are
+The dynamics foundations do not implement wheel/rail contact or guidance,
+complete trains, graphics, or application-specific gravity/friction models.
+Spline and rail geometry are implemented separately as described above.
+Useful mathematical references are
 [MIT's bilateral constraint equations](https://underactuated.mit.edu/multibody.html)
 and [Hairer's projection analysis](https://www.unige.ch/~hairer/preprints/symproj.pdf).
