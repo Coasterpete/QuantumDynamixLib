@@ -20,11 +20,15 @@ Implemented in the current library:
 - **Dynamics foundations:** unconstrained Newton-Euler rigid-body dynamics with
   RK4 integration, plus spherical-joint multibody dynamics and projected
   implicit-midpoint integration.
+- **First-stage wheel/rail contact:** owner-defined crowned treads, declared smooth
+  rail patches and material sides, frictionless rigid normal impulses coupled to
+  spherical joints, bounded geometric searches, and separate first-order stepping.
 
-Future application functionality, including FVD reconstruction, wheel/rail contact
-and guidance, complete coaster simulation, train animation, rendering, and UI,
-is not implemented here. Rail geometry queries do not advance vehicles or apply
-contact forces.
+Future application functionality, including FVD reconstruction, complete coaster
+simulation, friction, suspension, independent wheel spin, derailment modeling,
+train animation, rendering, and UI, is not implemented here. Rail geometry queries
+do not advance vehicles or apply contact forces. Contact stepping does not prescribe
+a spline-following trajectory.
 
 The owner-approved spline, easing, timeline, heartline, and constrained smoothing
 foundation is documented in [Spline and timeline mathematics](docs/SplineTimelineFoundation.md),
@@ -34,6 +38,12 @@ The owner-approved [physical rail geometry foundation](docs/PhysicalRailGeometry
 adds configurable rail arrangements and cross-sections, analytic offset geometry,
 independent spine/rail distances, explicit spacing/gauge measurements, and continuity
 diagnostics. Physical motion remains the responsibility of the existing dynamics solvers.
+
+The owner-approved [wheel/rail contact foundation](docs/WheelRailContactFoundation.md)
+documents local signed-gap geometry, the coupled impulse method, numerical controls,
+an executable-style C# example, and initial limitations. Impulses, step-average loads,
+and numerical corrections have distinct output semantics; precise impact timing and
+unique individual loads in redundant rigid assemblies are not supplied.
 
 ## Quick start
 
@@ -580,9 +590,25 @@ reduction when halving h, with bands allowing higher-order terms and finite
 reference error. Unit-scale analytic dynamics comparisons use roughly
 `1e-15` to `3e-14` component tolerances for floating-point roundoff.
 
-The dynamics foundations do not implement wheel/rail contact or guidance,
-complete trains, graphics, or application-specific gravity/friction models.
+The RK4 and bilateral midpoint paths above do not implement wheel/rail contact.
+The separate contact foundation is documented below; complete trains, graphics,
+and application-specific gravity/friction models remain outside these solvers.
 Spline and rail geometry are implemented separately as described above.
 Useful mathematical references are
 [MIT's bilateral constraint equations](https://underactuated.mit.edu/multibody.html)
 and [Hairer's projection analysis](https://www.unige.ch/~hairer/preprints/symproj.pdf).
+
+## Wheel/rail contact foundation
+
+`WheelRailContactSystem` binds existing bodies and stationary `RailGeometry` to
+explicit wheel/patch pairs. `WheelRailContactGeometry.Query` returns local signed
+gaps, normals, witnesses, and relative material-point velocities.
+`ContactMultibodyIntegrator.Step` advances the existing `MultibodyState` using a
+coupled bilateral/unilateral impulse solve and bounded numerical corrections.
+
+This is a first-order rigid inelastic approximation for small, determinate systems
+on declared regular smooth patches. It is not continuous collision detection or a
+complete vehicle model. Unresolved searches, unsupported features, dependent tight
+support rows, and exhausted solver budgets fail explicitly without advancing input
+snapshots. See [the engineering document](docs/WheelRailContactFoundation.md) for
+the exact supported domain, failure policy, units, and numerical limitations.

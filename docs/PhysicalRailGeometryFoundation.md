@@ -224,3 +224,8 @@ creates the supplied collection; the classes copy it. A sample's `readonly recor
 struct` stores a small value snapshot. Geometry queries never write a body pose,
 velocity, load, or constraint. No contact, suspension, friction, train animation,
 or vehicle dynamics is implemented by this layer.
+
+The separate [wheel/rail contact foundation](WheelRailContactFoundation.md) now
+consumes these surface queries through explicit smooth-patch/material-side bindings.
+It leaves the geometry API and its open-boundary semantics unchanged. A contact
+binding does not convert an arbitrary boundary into a globally valid material solid.
