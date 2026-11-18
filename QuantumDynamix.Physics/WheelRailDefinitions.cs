@@ -92,7 +92,7 @@ public sealed class RailContactPatch
     }
 }
 
-/// <summary>An explicit permitted pair. The only initial law is frictionless rigid inelastic contact.</summary>
+/// <summary>An explicit geometry binding. Its rigid or compliant normal law is selected by the separate formulation.</summary>
 public sealed record WheelRailPair(string WheelId, string PatchId);
 
 /// <summary>Immutable contact bindings around the existing dynamics system and stationary rails.</summary>

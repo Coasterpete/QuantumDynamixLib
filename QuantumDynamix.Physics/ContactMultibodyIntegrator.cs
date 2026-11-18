@@ -23,6 +23,7 @@ public static class ContactMultibodyIntegrator
         if (!double.IsFinite(time) || !double.IsFinite(step) || step <= 0
             || !double.IsFinite(time + step) || !(time + step > time))
         { throw new ArgumentOutOfRangeException(nameof(step), "Resolve distinct finite start/end times with a positive step."); }
+        using var formulation = new ContactFormulationScope(system, rigid: true);
         try { return StepCore(system, state, time, step, evaluateLoads, settings); }
         catch (ContactSolveException error)
         {

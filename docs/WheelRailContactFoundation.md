@@ -6,6 +6,11 @@ The existing rigid-body, spherical-joint, spline, and rail implementations retai
 their entry points and semantics. The new contact path consumes their existing
 mathematics and geometry; it does not prescribe a vehicle trajectory.
 
+This document describes the rigid impulse formulation. The optional
+[compliant normal-contact foundation](CompliantWheelRailContactFoundation.md)
+uses the same signed-gap geometry and existing joint dynamics through a separate
+force/integration path; its physical compression is not rigid penetration correction.
+
 ## Supported physical model
 
 - Stationary rails and explicit owner-authored wheel/rail pair bindings.
@@ -21,7 +26,9 @@ lateral guidance without tangential friction. There are no manufacturer presets,
 gauge assumptions, wheel-count templates, or automatic bogie construction.
 
 Independent wheel spin, revolute joints, friction, suspension, elastic contact,
-preload distribution, derailment rules, animation, and rendering are absent.
+preload distribution, derailment rules, animation, and rendering are absent from
+this rigid path. The separate compliant path supplies local normal deformation
+and owner-parameterized load sharing.
 Owners supply the body's mass and inertia, including whatever mounted mass their
 model represents. Axisymmetric tread geometry needs no spin coordinate, but this
 does not model an independently spinning wheel's inertia or gyroscopic effects.

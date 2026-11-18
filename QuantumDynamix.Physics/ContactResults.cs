@@ -10,7 +10,7 @@ public enum ContactSolveFailure
 {
     UnsupportedFeature, AmbiguousContact, GeometryUnresolved, InvalidPatch, MaterialSideMismatch,
     InconsistentInitialState, IndeterminateReactions, LinearSolve, ActiveSetLimit, PositionProjection,
-    StepResolution, NumericalFailure
+    StepResolution, NumericalFailure, CompressionLimit, MixedFormulations
 }
 
 /// <summary>A failed query or step never returns separation or an advanced state as a substitute.</summary>

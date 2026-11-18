@@ -179,7 +179,7 @@ public static class ConstrainedMultibodyIntegrator
 
         return new(accepted, acceptedDynamics, corrections, new(iterations, residualNorm,
             positionIterations, velocityIterations, ConstraintAssembly.MaximumJointError(before.PositionError),
-            ConstraintAssembly.MaximumJointError(before.VelocityError)));
+            ConstraintAssembly.MaximumJointError(before.VelocityError)), predicted);
 
         double[] Residual(double[] increment)
         {

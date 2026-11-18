@@ -77,6 +77,7 @@ public readonly record struct ConstrainedStepDiagnostics(int MidpointIterations,
 
 public sealed class ConstrainedStepResult
 {
+    internal MultibodyState UnprojectedState { get; }
     public MultibodyState State { get; }
     /// <summary>Recomputed instantaneous reactions/derivatives at the accepted endpoint, not timestep averages.</summary>
     public ConstrainedDynamicsResult AcceptedDynamics { get; }
@@ -84,11 +85,12 @@ public sealed class ConstrainedStepResult
     public ConstrainedStepDiagnostics Diagnostics { get; }
 
     internal ConstrainedStepResult(MultibodyState state, ConstrainedDynamicsResult dynamics,
-        BodyProjectionCorrection[] corrections, ConstrainedStepDiagnostics diagnostics)
+        BodyProjectionCorrection[] corrections, ConstrainedStepDiagnostics diagnostics, MultibodyState unprojectedState)
     {
         State = state;
         AcceptedDynamics = dynamics;
         ProjectionCorrections = Array.AsReadOnly(corrections);
         Diagnostics = diagnostics;
+        UnprojectedState = unprojectedState;
     }
 }

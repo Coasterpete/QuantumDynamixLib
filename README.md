@@ -20,14 +20,21 @@ Implemented in the current library:
 - **Dynamics foundations:** unconstrained Newton-Euler rigid-body dynamics with
   RK4 integration, plus spherical-joint multibody dynamics and projected
   implicit-midpoint integration.
-- **First-stage wheel/rail contact:** owner-defined crowned treads, declared smooth
-  rail patches and material sides, frictionless rigid normal impulses coupled to
-  spherical joints, bounded geometric searches, and separate first-order stepping.
+- **Wheel/rail contact geometry:** owner-defined crowned treads, declared smooth
+  stationary rail patches and material sides, bounded signed-gap searches,
+  surface normals, contact witnesses, and relative material-point velocities.
+- **Rigid normal contact:** frictionless unilateral normal impulses coupled to
+  spherical joints, inelastic discrete impacts, separation, step-average loads,
+  and separate first-order stepping for determinate contact reactions.
+- **Compliant normal contact:** explicit owner-supplied power-law coefficients,
+  compression-only non-attractive damping, deformation-dependent wheel-load
+  sharing, instantaneous forces and elastic energy, and a separate integration
+  path using the existing projected implicit-midpoint joint solver.
 
 Future application functionality, including FVD reconstruction, complete coaster
-simulation, friction, suspension, independent wheel spin, derailment modeling,
-train animation, rendering, and UI, is not implemented here. Rail geometry queries
-do not advance vehicles or apply contact forces. Contact stepping does not prescribe
+simulation, friction, suspension, revolute joints, independent wheel spin,
+derailment modeling, train animation, rendering, and UI, is not implemented here.
+Rail geometry queries do not advance vehicles or apply contact forces. Contact stepping does not prescribe
 a spline-following trajectory.
 
 The owner-approved spline, easing, timeline, heartline, and constrained smoothing
@@ -44,6 +51,12 @@ documents local signed-gap geometry, the coupled impulse method, numerical contr
 an executable-style C# example, and initial limitations. Impulses, step-average loads,
 and numerical corrections have distinct output semantics; precise impact timing and
 unique individual loads in redundant rigid assemblies are not supplied.
+
+The optional [compliant normal-contact foundation](docs/CompliantWheelRailContactFoundation.md)
+documents the force law, physical parameter limits, energy diagnostics, and
+analytical load-sharing regressions. Physical compression is retained; numerical
+joint corrections are reported separately. Real-wheel coefficients and impact
+accuracy require physical evidence beyond these synthetic regression cases.
 
 ## Quick start
 
@@ -78,9 +91,10 @@ for Release builds, formatting checks, and editor setup.
 
 ## Usage examples
 
-Each block is an independent console program. Geometry inputs below are
-illustrative caller-supplied values in metres, not library defaults or
-manufacturer dimensions. `Vector3d` stores numbers without attaching units;
+The vector, spline, and physical-rail blocks are independent console programs.
+The later contact programs use the explicitly provided shared example setup.
+Geometry inputs below are illustrative caller-supplied values in metres, not
+library defaults or manufacturer dimensions. `Vector3d` stores numbers without attaching units;
 callers must use consistent units.
 
 ### Vector mathematics
@@ -224,6 +238,146 @@ separate `Validate()` inspection. See [Physical rail geometry](docs/PhysicalRail
 for validation units and limits, surface queries, gauge datums, distance inversion,
 and caller-defined profiles. This example defines geometry only; it does not
 model wheel/rail contact or guide a vehicle.
+
+### Wheel/rail contact examples
+
+Copy the [shared example setup](docs/WheelRailContactExamples.md#shared-setup)
+into `ContactExampleSetup.cs` beside your demo's `Program.cs`. Each contact program
+below can then replace `Program.cs` and run independently. The helper is example
+code that builds explicit definitions using public library APIs; it is not an
+additional library API. All dimensions, masses, stiffnesses, and numerical bounds
+are synthetic examples. [The full guide](docs/WheelRailContactExamples.md) includes
+the complete setup, longer examples, expected results, and verification details.
+
+#### Detect a wheel/rail gap and contact position
+
+<!-- example: readme-contact-detection -->
+```csharp
+using System;
+using QuantumDynamix.Physics;
+
+var contacts = ContactExampleSetup.CreateSystem();
+var state = ContactExampleSetup.CreateState(gap: 0.01);
+WheelRailContactSample hit = WheelRailContactGeometry.Query(contacts, state).Contacts[0];
+Console.WriteLine($"Gap: {hit.Gap:F6} m");
+Console.WriteLine($"Normal: ({hit.Normal.X:F1}, {hit.Normal.Y:F1}, {hit.Normal.Z:F1})");
+Console.WriteLine($"Wheel point: ({hit.WheelPoint.X:F3}, {hit.WheelPoint.Y:F3}, {hit.WheelPoint.Z:F3}) m");
+```
+
+This gives a 0.01 m clearance, normal `(0, 0, 1)`, and wheel-surface witness
+`(5, 0, 0.01)` m above the rail at Z=0. Tiny near-zero components may print as
+`-0.000`. The witness is a point on the undeformed
+tread, not the wheel center. A positive gap means clearance, zero means touching,
+and a negative gap represents nominal overlap. A query reports geometry without
+applying force or advancing time; unresolved geometry throws rather than implying
+separation. See [detection and signed gaps](docs/WheelRailContactExamples.md#1-detection-and-signed-gaps).
+
+#### Rigid contact impulses and separation
+
+<!-- example: readme-rigid-contact -->
+```csharp
+using System;
+using QuantumDynamix.Physics;
+
+var contacts = ContactExampleSetup.CreateSystem();
+var controls = new ContactSolverSettings(0.05, 0.05, 0.001, 0.01);
+var incoming = ContactExampleSetup.CreateState(gap: 0, normalVelocity: -1);
+ContactStepResult impact = ContactMultibodyIntegrator.Step(contacts, incoming, 0, 0.01,
+    (_, _) => new RigidBodyLoads[1], controls);
+Console.WriteLine($"Impulse: {impact.ContactImpulses[0].NormalImpulse:F3} N*s");
+Console.WriteLine($"Average force: {impact.ContactImpulses[0].AverageForce.Z:F3} N");
+
+var leaving = ContactExampleSetup.CreateState(gap: 0, normalVelocity: 0.5);
+ContactStepResult separation = ContactMultibodyIntegrator.Step(contacts, leaving, 0, 0.01,
+    (_, _) => new RigidBodyLoads[1], controls);
+Console.WriteLine($"Separating impulse: {separation.ContactImpulses[0].NormalImpulse:F3} N*s");
+Console.WriteLine($"Separated gap: {separation.AcceptedContacts[0].Gap:F6} m");
+```
+
+The 2 kg body closing at 1 m/s receives 2 N*s, stopping its normal motion in this
+central, initially touching case. Impulse is the change in momentum; dividing it
+by the 0.01 s step gives a **step-average** force of 200 N. This is not a measured
+impact peak. The separate leaving case receives zero impulse and opens a 0.005 m
+gap: contact can push, but cannot pull the wheel back. The load callbacks return
+one zero force/torque value, so no gravity or other external load is applied.
+[The longer rigid example](docs/WheelRailContactExamples.md#2-rigid-impulses-separation-and-average-force)
+also shows why halving the step doubles this impact's reported average force.
+
+#### Compliant compression, normal force, and stored energy
+
+<!-- example: readme-compliant-contact -->
+```csharp
+using System;
+using System.Collections.Generic;
+using QuantumDynamix.Math;
+using QuantumDynamix.Physics;
+
+var contacts = ContactExampleSetup.CreateSystem();
+var law = new PowerLawNormalContact(
+    coefficient: 2000, exponent: 1, dissipation: 0, maximumCompression: 0.02);
+var model = new CompliantWheelRailContactModel(contacts,
+    new Dictionary<WheelRailPair, PowerLawNormalContact> { [contacts.Pairs[0]] = law });
+var state = ContactExampleSetup.CreateState(gap: -0.01);
+var controls = new CompliantContactStepSettings(0.05, 0.05, 0.001, 0.01);
+CompliantContactStepResult result = CompliantContactMultibodyIntegrator.Step(model, state, 0, 0.001,
+    (_, _) => new[] { new RigidBodyLoads(new Vector3d(0, 0, -20), Vector3d.Zero) }, controls);
+NormalContactResponse response = result.AcceptedContacts.Contacts[0].Response;
+Console.WriteLine($"Compression: {response.Compression:F6} m");
+Console.WriteLine($"Normal force: {response.NormalForce:F3} N");
+Console.WriteLine($"Stored energy: {response.ElasticEnergy:F6} J");
+```
+
+Compression is `delta = max(0, -gap)`: negating a negative gap gives a positive
+deformation, while positive clearance gives zero compression. With exponent 1
+and zero dissipation, `force = k * delta` and `energy = 0.5 * k * delta * delta`.
+Here k=2000 N/m and delta=0.01 m give 20 N and 0.1 J. The supplied -20 N load
+balances that force, so compression remains in the accepted state. The 0.02 m
+physical validity limit is separate from numerical movement/correction bounds.
+[The compliant example](docs/WheelRailContactExamples.md#3-compliant-force-and-elastic-energy)
+explains the general power law and non-attractive damping.
+
+#### Multiple-wheel load sharing
+
+For three collinear supports with equal clearances, equal outside stiffnesses,
+and no overturning moment, equilibrium requires the common compression below.
+This small program is an analytical check; the
+[complete three-wheel library example](docs/WheelRailContactExamples.md#4-three-support-load-sharing)
+constructs all contacts, advances the coupled body, and prints each wheel's load.
+
+<!-- example: readme-three-support-check -->
+```csharp
+using System;
+
+double load = 4000;             // N, applied downward through the center
+double outsideStiffness = 1e6;  // N/m for each outside wheel
+double middleStiffness = 2e6;   // N/m
+double compression = load / (2 * outsideStiffness + middleStiffness);
+Console.WriteLine($"Compression: {compression:F6} m");
+Console.WriteLine($"Each outside wheel: {outsideStiffness * compression:F3} N");
+Console.WriteLine($"Middle wheel: {middleStiffness * compression:F3} N");
+```
+
+The result is 0.001 m compression and loads `(1000, 2000, 1000)` N. If the middle
+stiffness is also 1e6 N/m, compression becomes about 0.001333 m and each wheel
+carries about 1333.333 N. The full example verifies both cases. Changing stiffness
+changes the equilibrium deformation as well as the force split; clearance,
+unequal outside stiffness, or applied moments require the full geometry/dynamics.
+
+#### Choosing rigid or compliant contact
+
+| Question | Rigid formulation | Compliant formulation |
+| --- | --- | --- |
+| Appropriate use | Negligible-deformation approximation with determinate reactions | Deformation and load sharing using justified owner-supplied coefficients |
+| Main contact output | `NormalImpulse` in N*s; `AverageForce` in N over the step | `NormalForce` in N at the evaluated state; `ElasticEnergy` in J |
+| Compression | Enforces numerical nonpenetration bounds | Retains physical compression within the supplied law's domain |
+| Redundant rigid supports | Can raise `IndeterminateReactions` | Forces follow the supplied deformation laws; a stable equilibrium is still required |
+
+[The side-by-side program](docs/WheelRailContactExamples.md#5-rigid-versus-compliant-output-quantities)
+evaluates both formulations independently. The current rigid impacts are inelastic;
+the zero-dissipation compliant example stores and returns elastic energy. Their
+outputs describe different assumptions, and neither establishes a real impact
+peak. Use one formulation per physical contact. Both paths retain bounded local
+geometry and timestep limitations and implement normal interaction only.
 
 ## Development infrastructure
 
@@ -590,8 +744,10 @@ reduction when halving h, with bands allowing higher-order terms and finite
 reference error. Unit-scale analytic dynamics comparisons use roughly
 `1e-15` to `3e-14` component tolerances for floating-point roundoff.
 
-The RK4 and bilateral midpoint paths above do not implement wheel/rail contact.
-The separate contact foundation is documented below; complete trains, graphics,
+The RK4 and bilateral midpoint entry points above do not themselves impose
+wheel/rail contact. The compliant wrapper supplies contact forces to the existing
+midpoint infrastructure through its load callback. The separate contact foundations
+are documented below; complete trains, graphics,
 and application-specific gravity/friction models remain outside these solvers.
 Spline and rail geometry are implemented separately as described above.
 Useful mathematical references are
@@ -612,3 +768,12 @@ complete vehicle model. Unresolved searches, unsupported features, dependent tig
 support rows, and exhausted solver budgets fail explicitly without advancing input
 snapshots. See [the engineering document](docs/WheelRailContactFoundation.md) for
 the exact supported domain, failure policy, units, and numerical limitations.
+
+`CompliantWheelRailContactModel` assigns a `PowerLawNormalContact` to each binding.
+`CompliantWheelRailContact.Evaluate` reports instantaneous normal forces and stored
+elastic energy; `CompliantContactMultibodyIntegrator.Step` couples those forces to
+the existing joint solver. Physical compression is retained and joint-projection
+energy changes are reported separately. See the
+[compliant engineering document](docs/CompliantWheelRailContactFoundation.md) and
+[practical C# contact guide](docs/WheelRailContactExamples.md) for explicit physical
+parameters, working examples, numerical controls, and limitations.
