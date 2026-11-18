@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>QuantumDynamix</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <!-- One assembly; explicitly include the existing subsystem directories.
+       Tests, tools, and generated files must never become library sources. -->
+  <ItemGroup>
+    <Compile Include="QuantumDynamix.Math/**/*.cs;
+                      QuantumDynamix.Units/**/*.cs;
+                      QuantumDynamix.Splines/**/*.cs;
+                      QuantumDynamix.Geometry/**/*.cs;
+                      QuantumDynamix.Physics/**/*.cs;
+                      QuantumDynamix.FVD/**/*.cs;
+                      QuantumDynamix.Track/**/*.cs;
+                      QuantumDynamix.Supports/**/*.cs;
+                      QuantumDynamix.Operations/**/*.cs;
+                      QuantumDynamix.Telemetry/**/*.cs;
+                      QuantumDynamix.IO/**/*.cs;
+                      QuantumDynamix.Interop/**/*.cs"
+             Exclude="**/bin/**;**/obj/**" />
+  </ItemGroup>
+</Project>

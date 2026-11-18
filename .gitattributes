@@ -1,0 +1,3 @@
+# Keep text line endings consistent with .editorconfig across platforms.
+* text=auto eol=lf
+*.sln text eol=crlf
