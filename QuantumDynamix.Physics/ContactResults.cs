@@ -71,7 +71,18 @@ public readonly record struct SphericalJointImpulse(Vector3d ImpulseOnA, Vector3
 public readonly record struct ContactStepDiagnostics(int ActiveSetIterations, int PositionProjectionIterations,
     double MinimumGap, double MaximumJointGap, double MaximumJointSlip,
     double MaximumVelocityViolation, double MaximumNegativeImpulse, double ScaledComplementarityResidual,
-    double LinearSolveRelativeResidual, double MomentumRelativeResidual, double MinimumScaledPivot);
+    double LinearSolveRelativeResidual, double MomentumRelativeResidual, double MinimumScaledPivot)
+{
+    /// <summary>Maximum accepted directed-axle misalignment (rad).</summary>
+    public double MaximumJointAngularGap { get; internal init; }
+    /// <summary>Maximum accepted hinge alignment-row rate norm (1/s).</summary>
+    public double MaximumJointAngularSlip { get; internal init; }
+    /// <summary>Largest scalar angular equality residual in the physical impulse solve (1/s).
+    /// MaximumVelocityViolation continues to contain only metre-per-second rows.</summary>
+    public double MaximumAngularVelocityViolation { get; internal init; }
+    /// <summary>Maximum physical-solve row violation divided by its own dimensional tolerance.</summary>
+    public double ScaledVelocityViolation { get; internal init; }
+}
 
 public sealed class ContactStepResult
 {
@@ -80,19 +91,21 @@ public sealed class ContactStepResult
     public ReadOnlyCollection<WheelRailContactImpulse> ContactImpulses { get; }
     public ReadOnlyCollection<WheelRailContactSample> AcceptedContacts { get; }
     public ReadOnlyCollection<SphericalJointImpulse> JointImpulses { get; }
+    public ReadOnlyCollection<RevoluteJointImpulse> RevoluteJointImpulses { get; }
     public ReadOnlyCollection<RigidBodyLoads> AverageConstraintLoads { get; }
     /// <summary>Purely numerical endpoint position/orientation/velocity corrections; never physical loads.</summary>
     public ReadOnlyCollection<BodyProjectionCorrection> NumericalCorrections { get; }
     public ContactStepDiagnostics Diagnostics { get; }
 
     internal ContactStepResult(MultibodyState state, WheelRailContactImpulse[] contacts,
-        WheelRailContactSample[] accepted, SphericalJointImpulse[] joints, RigidBodyLoads[] averageLoads,
+        WheelRailContactSample[] accepted, SphericalJointImpulse[] joints, RevoluteJointImpulse[] revoluteJoints, RigidBodyLoads[] averageLoads,
         BodyProjectionCorrection[] corrections, ContactStepDiagnostics diagnostics)
     {
         State = state;
         ContactImpulses = Array.AsReadOnly(contacts);
         AcceptedContacts = Array.AsReadOnly(accepted);
         JointImpulses = Array.AsReadOnly(joints);
+        RevoluteJointImpulses = Array.AsReadOnly(revoluteJoints);
         AverageConstraintLoads = Array.AsReadOnly(averageLoads);
         NumericalCorrections = Array.AsReadOnly(corrections);
         Diagnostics = diagnostics;

@@ -8,7 +8,8 @@ namespace QuantumDynamix.Physics;
 public static class ConstrainedMultibodyDynamics
 {
     /// <summary>Evaluates instantaneous reactions and derivatives at the supplied snapshot.</summary>
-    /// <remarks>This evaluates a smooth acceleration-level extension even off the constraint manifold;
+    /// <remarks>This evaluates a smooth acceleration-level extension off the constraint manifold
+    /// within each revolute joint's supported directed alignment chart;
     /// it reports position/velocity errors and does not assemble or advance the state. The integrator
     /// requires consistent initial data and accepts endpoints only within its gap/slip tolerances.</remarks>
     public static ConstrainedDynamicsResult Evaluate(MultibodySystem system, MultibodyState state,
@@ -71,6 +72,15 @@ public static class ConstrainedMultibodyDynamics
             constraintLoads[joint.BodyA] += new RigidBodyLoads(force, reactions[j].TorqueOnA);
             constraintLoads[joint.BodyB] += new RigidBodyLoads(-force, reactions[j].TorqueOnB);
         }
+        RevoluteJointReaction[] revoluteReactions = new RevoluteJointReaction[system.RevoluteJoints.Count];
+        for (int j = 0; j < revoluteReactions.Length; j++)
+        {
+            RevoluteJoint joint = system.RevoluteJoints[j];
+            RevoluteJointReaction reaction = assembly.RevoluteReaction(system, state, j, multipliers);
+            revoluteReactions[j] = reaction;
+            constraintLoads[joint.BodyA] += new RigidBodyLoads(reaction.ForceOnA, reaction.TorqueOnA);
+            constraintLoads[joint.BodyB] += new RigidBodyLoads(reaction.ForceOnB, reaction.TorqueOnB);
+        }
 
         double[] acceleration = new double[freeAcceleration.Length];
         for (int i = 0; i < derivatives.Length; i++)
@@ -86,9 +96,14 @@ public static class ConstrainedMultibodyDynamics
             accelerationError[i] += assembly.Bias[i];
         }
 
-        return new(derivatives, constraintLoads, reactions, new(
-            ConstraintAssembly.MaximumJointError(assembly.PositionError),
-            ConstraintAssembly.MaximumJointError(assembly.VelocityError),
-            ConstraintAssembly.MaximumJointError(accelerationError), relativeResidual, assembly.Factor.MinimumPivot));
+        return new(derivatives, constraintLoads, reactions, revoluteReactions, new(
+            assembly.MaximumLinearError(assembly.PositionError),
+            assembly.MaximumLinearError(assembly.VelocityError),
+            assembly.MaximumLinearError(accelerationError), relativeResidual, assembly.Factor.MinimumPivot)
+        {
+            MaximumAngularPositionError = assembly.MaximumAlignmentError,
+            MaximumAngularVelocityError = assembly.MaximumAngularError(assembly.VelocityError),
+            MaximumAngularAccelerationError = assembly.MaximumAngularError(accelerationError)
+        });
     }
 }

@@ -6,10 +6,11 @@ using QuantumDynamix.Math;
 
 namespace QuantumDynamix.Physics;
 
-/// <summary>First-order semi-implicit rigid inelastic contact stepping, with coupled spherical joints.
+/// <summary>First-order semi-implicit rigid inelastic contact stepping, with coupled bilateral joints.
 /// Gap/h approximates collision timing. Bounded travel sampling is not continuous collision detection.</summary>
 /// <remarks>Uses the caller's external loads at the start snapshot, including Euler gyroscopic terms.
-/// No hidden compliance, gravity, retry, wheel spin, tangential friction, or guidance is supplied.</remarks>
+/// Independent wheel spin uses explicit wheel bodies and revolute joints. No hidden compliance,
+/// gravity, retry, tangential friction, or guidance is supplied.</remarks>
 public static class ContactMultibodyIntegrator
 {
     public static ContactStepResult Step(WheelRailContactSystem system, MultibodyState state,
@@ -49,10 +50,9 @@ public static class ContactMultibodyIntegrator
         MultibodySystem dynamics = system.Dynamics;
         ConstraintAssembly initial = new(dynamics, state, settings.Joints, "Initial contact joints");
         var contacts = WheelRailContactGeometry.Query(system, state, settings.Geometry).Contacts;
-        if (ConstraintAssembly.MaximumJointError(initial.PositionError) > settings.Joints.PositionTolerance
-            || ConstraintAssembly.MaximumJointError(initial.VelocityError) > settings.Joints.VelocityTolerance
+        if (initial.PositionNorm(settings.Joints) > 1 || initial.VelocityNorm(settings.Joints) > 1
             || contacts.Any(c => c.Gap < -settings.PositionTolerance))
-        { throw new ContactSolveException(ContactSolveFailure.InconsistentInitialState, "Initial contact state", "Supply assembled joints and nonpenetrating wheels (m and m/s tolerances)."); }
+        { throw new ContactSolveException(ContactSolveFailure.InconsistentInitialState, "Initial contact state", "Supply assembled joints and nonpenetrating wheels (separate m, m/s, rad and angular-row-rate tolerances)."); }
         IReadOnlyList<RigidBodyLoads> loads = evaluateLoads(time, state);
         ArgumentNullException.ThrowIfNull(loads);
         if (loads.Count != dynamics.Bodies.Count) { throw new ArgumentException("Supply one external load per body.", nameof(evaluateLoads)); }
@@ -68,9 +68,14 @@ public static class ContactMultibodyIntegrator
         int equalities = initial.PositionError.Length;
         double[] lower = new double[rows.GetLength(0)];
         for (int i = 0; i < equalities; i++) { lower[i] = -initial.PositionError[i] / step; }
+        // Revolute direction/attachment bias is known analytically. Its first-order velocity
+        // target makes the physical bearing impulse include turning/gyroscopic reactions.
+        // Retain the established spherical-only discrete equations and reaction semantics.
+        for (int i = 3 * dynamics.Joints.Count; i < equalities; i++) { lower[i] -= step * initial.Bias[i]; }
         for (int i = 0; i < contacts.Count; i++) { lower[equalities + i] = -contacts[i].Gap / step; }
         var solve = new ContactConstraintSolve(dynamics, rows, equalities, lower, free, settings,
-            settings.VelocityTolerance, settings.ImpulseTolerance, "Coupled contact impulses", checkReactionRank: true);
+            settings.VelocityTolerance, settings.ImpulseTolerance, "Coupled contact impulses", checkReactionRank: true,
+            angularRows: initial.AngularRows, angularFeasibilityTolerance: settings.Joints.AngularConstraints.AngularVelocityTolerance);
         CheckTravel(system, solve.Values, step, settings);
         MultibodyState predicted = Advance(state, solve.Values, step);
         // Bounded checks of the actual proposed discrete path. Thin features between samples can
@@ -98,13 +103,14 @@ public static class ContactMultibodyIntegrator
         for (int i = equalities; i < endpointLower.Length; i++) { endpointLower[i] = System.Math.Min(0, before[i]); }
         var velocityCorrection = new ContactConstraintSolve(dynamics, endpointRows, equalities, endpointLower,
             endpointVelocity, settings, System.Math.Min(settings.Joints.VelocityTolerance, settings.VelocityTolerance) / 4,
-            settings.ImpulseTolerance, "Numerical endpoint velocity correction");
+            settings.ImpulseTolerance, "Numerical endpoint velocity correction", angularRows: endpoint.AngularRows,
+            angularFeasibilityTolerance: settings.Joints.AngularConstraints.AngularVelocityTolerance / 4);
         accepted = WithVelocities(accepted, velocityCorrection.Values);
         acceptedContacts = WheelRailContactGeometry.Query(system, accepted, settings.Geometry).Contacts;
         endpoint = new(dynamics, accepted, settings.Joints, "Accepted contact joints");
-        double gap = ConstraintAssembly.MaximumJointError(endpoint.PositionError);
-        double slip = ConstraintAssembly.MaximumJointError(endpoint.VelocityError);
-        if (gap > settings.Joints.PositionTolerance || slip > settings.Joints.VelocityTolerance
+        double gap = endpoint.MaximumLinearError(endpoint.PositionError);
+        double slip = endpoint.MaximumLinearError(endpoint.VelocityError);
+        if (endpoint.PositionNorm(settings.Joints) > 1 || endpoint.VelocityNorm(settings.Joints) > 1
             || acceptedContacts.Any(c => c.Gap < -settings.PositionTolerance))
         { throw new ContactSolveException(ContactSolveFailure.PositionProjection, "Final contact verification", "Endpoint joint/contact bounds were not met."); }
 
@@ -130,6 +136,15 @@ public static class ContactMultibodyIntegrator
             averageLoads[joint.BodyA] += new RigidBodyLoads(impulse / step, angularA / step);
             averageLoads[joint.BodyB] += new RigidBodyLoads(-impulse / step, angularB / step);
         }
+        var revoluteImpulses = new RevoluteJointImpulse[dynamics.RevoluteJoints.Count];
+        for (int i = 0; i < revoluteImpulses.Length; i++)
+        {
+            RevoluteJoint joint = dynamics.RevoluteJoints[i];
+            RevoluteJointReaction impulse = initial.RevoluteReaction(dynamics, state, i, solve.Multipliers);
+            revoluteImpulses[i] = new(impulse.ForceOnA, impulse.CoupleOnA, impulse.TorqueOnA, impulse.TorqueOnB);
+            averageLoads[joint.BodyA] += new RigidBodyLoads(impulse.ForceOnA / step, impulse.TorqueOnA / step);
+            averageLoads[joint.BodyB] += new RigidBodyLoads(impulse.ForceOnB / step, impulse.TorqueOnB / step);
+        }
         var corrections = new BodyProjectionCorrection[dynamics.Bodies.Count];
         for (int i = 0; i < corrections.Length; i++)
         {
@@ -139,10 +154,16 @@ public static class ContactMultibodyIntegrator
                 (raw.Pose.Orientation.Conjugated() * final.Pose.Orientation).Normalized(),
                 final.LinearVelocity - raw.LinearVelocity, final.BodyAngularVelocity - raw.BodyAngularVelocity);
         }
-        return new(accepted, impulses, acceptedContacts.ToArray(), jointImpulses, averageLoads, corrections,
+        return new(accepted, impulses, acceptedContacts.ToArray(), jointImpulses, revoluteImpulses, averageLoads, corrections,
             new(solve.Iterations, projectionIterations, acceptedContacts.Count == 0 ? 0 : acceptedContacts.Min(c => c.Gap),
                 gap, slip, solve.FeasibilityError, solve.NegativeImpulse, solve.ComplementarityError,
-                solve.LinearError, solve.MomentumError, solve.MinimumPivot));
+                solve.LinearError, solve.MomentumError, solve.MinimumPivot)
+            {
+                MaximumJointAngularGap = endpoint.MaximumAlignmentError,
+                MaximumJointAngularSlip = endpoint.MaximumAngularError(endpoint.VelocityError),
+                MaximumAngularVelocityViolation = solve.AngularFeasibilityError,
+                ScaledVelocityViolation = solve.ScaledFeasibilityError
+            });
     }
 
     private static MultibodyState ProjectPositions(WheelRailContactSystem system, MultibodyState predicted,
@@ -165,7 +186,9 @@ public static class ContactMultibodyIntegrator
             var correction = new ContactConstraintSolve(system.Dynamics, rows, equalities, lower,
                 new double[6 * state.Bodies.Count], settings,
                 System.Math.Min(settings.Joints.PositionTolerance, settings.PositionTolerance) / 4,
-                settings.ImpulseTolerance, "Numerical contact position correction");
+                settings.ImpulseTolerance, "Numerical contact position correction", angularRows: joints.AngularRows,
+                angularFeasibilityTolerance: System.Math.Sin(settings.Joints.AngularConstraints.OrientationTolerance) / 4,
+                positionCorrection: true);
             bool improved = false;
             double fraction = 1;
             for (int trial = 0; trial < settings.Joints.MaxLineSearchIterations; trial++, fraction /= 2)
@@ -185,7 +208,7 @@ public static class ContactMultibodyIntegrator
 
     private static double PositionNorm(ConstraintAssembly joints, IReadOnlyList<WheelRailContactSample> contacts, ContactSolverSettings settings)
     {
-        double norm = ConstraintAssembly.MaximumJointError(joints.PositionError) / settings.Joints.PositionTolerance;
+        double norm = joints.PositionNorm(settings.Joints);
         foreach (WheelRailContactSample contact in contacts) { norm = System.Math.Max(norm, -contact.Gap / settings.PositionTolerance); }
         return norm;
     }

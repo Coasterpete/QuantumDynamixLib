@@ -52,13 +52,14 @@ public static class ConstrainedMultibodyIntegrator
         Func<double, MultibodyState, IReadOnlyList<RigidBodyLoads>> evaluateLoads, ConstrainedSolverSettings settings)
     {
         ConstraintAssembly initialAssembly = new(system, state, settings, "Initial constraints");
-        double gap = ConstraintAssembly.MaximumJointError(initialAssembly.PositionError);
-        double slip = ConstraintAssembly.MaximumJointError(initialAssembly.VelocityError);
-        if (gap > settings.PositionTolerance || slip > settings.VelocityTolerance)
+        double gap = initialAssembly.MaximumLinearError(initialAssembly.PositionError);
+        double slip = initialAssembly.MaximumLinearError(initialAssembly.VelocityError);
+        if (initialAssembly.PositionNorm(settings) > 1 || initialAssembly.VelocityNorm(settings) > 1)
         {
             throw new ConstrainedSolveException(ConstrainedSolveFailure.InconsistentInitialState, "Initial constraints", 0,
-                System.Math.Max(gap / settings.PositionTolerance, slip / settings.VelocityTolerance),
-                $"Initial gap={gap:E6} m, slip={slip:E6} m/s exceed tolerance. Supply assembled initial data; residual is tolerance-scaled.");
+                System.Math.Max(initialAssembly.PositionNorm(settings), initialAssembly.VelocityNorm(settings)),
+                $"Initial gap={gap:E6} m, slip={slip:E6} m/s, axle angle={initialAssembly.MaximumAlignmentError:E6} rad, "
+                + $"angular row rate={initialAssembly.MaximumAngularError(initialAssembly.VelocityError):E6} 1/s. Supply assembled initial data; residual is tolerance-scaled.");
         }
 
         ConstrainedDynamicsResult initial = ConstrainedMultibodyDynamics.Evaluate(system, state,
@@ -161,10 +162,19 @@ public static class ConstrainedMultibodyIntegrator
         ConstrainedDynamicsResult acceptedDynamics = ConstrainedMultibodyDynamics.Evaluate(system, accepted,
             evaluateLoads(endpoint, accepted), settings);
         if (acceptedDynamics.Diagnostics.MaximumPositionError > settings.PositionTolerance
-            || acceptedDynamics.Diagnostics.MaximumVelocityError > settings.VelocityTolerance)
+            || acceptedDynamics.Diagnostics.MaximumVelocityError > settings.VelocityTolerance
+            || acceptedDynamics.Diagnostics.MaximumAngularPositionError > settings.AngularConstraints.OrientationTolerance
+            || acceptedDynamics.Diagnostics.MaximumAngularVelocityError > settings.AngularConstraints.AngularVelocityTolerance)
         {
+            bool mixed = system.RevoluteJoints.Count != 0;
+            ConstraintDiagnostics errors = acceptedDynamics.Diagnostics;
+            double finalResidual = mixed ? System.Math.Max(
+                System.Math.Max(errors.MaximumPositionError / settings.PositionTolerance, errors.MaximumVelocityError / settings.VelocityTolerance),
+                System.Math.Max(errors.MaximumAngularPositionError / settings.AngularConstraints.OrientationTolerance,
+                    errors.MaximumAngularVelocityError / settings.AngularConstraints.AngularVelocityTolerance)) : errors.MaximumVelocityError;
             throw new ConstrainedSolveException(ConstrainedSolveFailure.VelocityProjection, "Final constraint verification",
-                velocityIterations, acceptedDynamics.Diagnostics.MaximumVelocityError, "Projected endpoint failed final gap/slip verification.");
+                velocityIterations, finalResidual, mixed ? "Projected endpoint failed point/angular verification; residual is tolerance-scaled."
+                    : "Projected endpoint failed final gap/slip verification.");
         }
 
         BodyProjectionCorrection[] corrections = new BodyProjectionCorrection[system.Bodies.Count];
@@ -178,8 +188,12 @@ public static class ConstrainedMultibodyIntegrator
         }
 
         return new(accepted, acceptedDynamics, corrections, new(iterations, residualNorm,
-            positionIterations, velocityIterations, ConstraintAssembly.MaximumJointError(before.PositionError),
-            ConstraintAssembly.MaximumJointError(before.VelocityError)), predicted);
+            positionIterations, velocityIterations, before.MaximumLinearError(before.PositionError),
+            before.MaximumLinearError(before.VelocityError))
+        {
+            BeforeProjectionAngularPositionError = before.MaximumAlignmentError,
+            BeforeProjectionAngularVelocityError = before.MaximumAngularError(before.VelocityError)
+        }, predicted);
 
         double[] Residual(double[] increment)
         {
@@ -237,15 +251,15 @@ public static class ConstrainedMultibodyIntegrator
         for (iterations = 0; ; iterations++)
         {
             ConstraintAssembly assembly = new(system, state, settings, "Position projection");
-            double norm = ConstraintAssembly.MaximumJointError(assembly.PositionError);
-            if (norm <= settings.PositionTolerance)
+            double norm = assembly.PositionNorm(settings);
+            if (norm <= 1)
             {
                 return state;
             }
 
             if (iterations == settings.MaxProjectionIterations)
             {
-                throw ProjectionFailure(true, iterations, norm, "Position projection iteration limit reached (residual in m).");
+                throw ProjectionFailure(true, iterations, norm, system, settings, "Position projection iteration limit reached.");
             }
 
             double[] multipliers = assembly.Factor.Solve(assembly.PositionError, out _);
@@ -267,8 +281,8 @@ public static class ConstrainedMultibodyIntegrator
 
                 MultibodyState candidate = new(bodies);
                 ConstraintAssembly trialAssembly = new(system, candidate, settings, "Position projection trial");
-                double trialNorm = ConstraintAssembly.MaximumJointError(trialAssembly.PositionError);
-                if (trialNorm <= settings.PositionTolerance || trialNorm < (1 - 1e-4 * fraction) * norm)
+                double trialNorm = trialAssembly.PositionNorm(settings);
+                if (trialNorm <= 1 || trialNorm < (1 - 1e-4 * fraction) * norm)
                 {
                     state = candidate;
                     improved = true;
@@ -278,7 +292,7 @@ public static class ConstrainedMultibodyIntegrator
 
             if (!improved)
             {
-                throw ProjectionFailure(true, iterations, norm, "Position projection line search failed (residual in m).");
+                throw ProjectionFailure(true, iterations, norm, system, settings, "Position projection line search failed.");
             }
         }
     }
@@ -289,15 +303,15 @@ public static class ConstrainedMultibodyIntegrator
         for (iterations = 0; ; iterations++)
         {
             ConstraintAssembly assembly = new(system, state, settings, "Velocity projection");
-            double norm = ConstraintAssembly.MaximumJointError(assembly.VelocityError);
-            if (norm <= settings.VelocityTolerance)
+            double norm = assembly.VelocityNorm(settings);
+            if (norm <= 1)
             {
                 return state;
             }
 
             if (iterations == settings.MaxProjectionIterations)
             {
-                throw ProjectionFailure(false, iterations, norm, "Velocity projection iteration limit reached (residual in m/s).");
+                throw ProjectionFailure(false, iterations, norm, system, settings, "Velocity projection iteration limit reached.");
             }
 
             double[] multipliers = assembly.Factor.Solve(assembly.VelocityError, out _);
@@ -320,4 +334,11 @@ public static class ConstrainedMultibodyIntegrator
     private static ConstrainedSolveException ProjectionFailure(bool position, int iterations, double residual, string message) =>
         new(position ? ConstrainedSolveFailure.PositionProjection : ConstrainedSolveFailure.VelocityProjection,
             position ? "Position projection" : "Velocity projection", iterations, residual, message);
+
+    private static ConstrainedSolveException ProjectionFailure(bool position, int iterations, double scaledResidual,
+        MultibodySystem system, ConstrainedSolverSettings settings, string message) =>
+        ProjectionFailure(position, iterations,
+            system.RevoluteJoints.Count == 0 ? scaledResidual * (position ? settings.PositionTolerance : settings.VelocityTolerance) : scaledResidual,
+            message + (system.RevoluteJoints.Count != 0 ? " Residual is tolerance-scaled across linear/angular blocks."
+                : position ? " Residual is in m." : " Residual is in m/s."));
 }

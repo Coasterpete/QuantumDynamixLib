@@ -34,7 +34,8 @@ public sealed class CrownedWheelTread
     }
 }
 
-/// <summary>Owner-authored wheel geometry attached to an existing body's COM frame; no spin coordinate.</summary>
+/// <summary>Owner-authored wheel geometry attached to an existing body's COM frame. Independent spin
+/// uses an explicit wheel body and revolute joint; geometry adds no separate spin state or mass.</summary>
 public sealed class WheelDefinition
 {
     public string Id { get; }

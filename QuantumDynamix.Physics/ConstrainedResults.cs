@@ -12,7 +12,8 @@ public enum ConstrainedSolveFailure
     PositionProjection,
     VelocityProjection,
     InconsistentInitialState,
-    NumericalFailure
+    NumericalFailure,
+    UnsupportedJointConfiguration
 }
 
 /// <summary>A failed calculation never returns a partially advanced state.</summary>
@@ -37,7 +38,15 @@ public sealed class ConstrainedSolveException : InvalidOperationException
 
 /// <summary>Maximum joint Euclidean errors (m, m/s, m/s^2), and dimensionless linear-solve diagnostics.</summary>
 public readonly record struct ConstraintDiagnostics(double MaximumPositionError, double MaximumVelocityError,
-    double MaximumAccelerationError, double LinearSolveRelativeResidual, double MinimumScaledPivot);
+    double MaximumAccelerationError, double LinearSolveRelativeResidual, double MinimumScaledPivot)
+{
+    /// <summary>Maximum actual directed-axle misalignment (rad).</summary>
+    public double MaximumAngularPositionError { get; internal init; }
+    /// <summary>Maximum norm of a hinge's two alignment-row rates (1/s; forbidden rad/s at alignment).</summary>
+    public double MaximumAngularVelocityError { get; internal init; }
+    /// <summary>Maximum norm of the two alignment-row acceleration residuals (1/s^2).</summary>
+    public double MaximumAngularAccelerationError { get; internal init; }
+}
 
 /// <summary>Instantaneous world reaction at the evaluated state: force on A (N), and COM torques (N*m).</summary>
 public readonly record struct SphericalJointReaction(Vector3d ForceOnA, Vector3d TorqueOnA, Vector3d TorqueOnB)
@@ -50,14 +59,16 @@ public sealed class ConstrainedDynamicsResult
     public ReadOnlyCollection<RigidBodyDerivative> Derivatives { get; }
     public ReadOnlyCollection<RigidBodyLoads> ConstraintLoads { get; }
     public ReadOnlyCollection<SphericalJointReaction> JointReactions { get; }
+    public ReadOnlyCollection<RevoluteJointReaction> RevoluteJointReactions { get; }
     public ConstraintDiagnostics Diagnostics { get; }
 
     internal ConstrainedDynamicsResult(RigidBodyDerivative[] derivatives, RigidBodyLoads[] loads,
-        SphericalJointReaction[] reactions, ConstraintDiagnostics diagnostics)
+        SphericalJointReaction[] reactions, RevoluteJointReaction[] revoluteReactions, ConstraintDiagnostics diagnostics)
     {
         Derivatives = Array.AsReadOnly(derivatives);
         ConstraintLoads = Array.AsReadOnly(loads);
         JointReactions = Array.AsReadOnly(reactions);
+        RevoluteJointReactions = Array.AsReadOnly(revoluteReactions);
         Diagnostics = diagnostics;
     }
 }
@@ -73,7 +84,13 @@ public readonly record struct BodyProjectionCorrection(Vector3d PositionChange, 
 /// <summary>Newton residual is dimensionless; pre-projection gap/slip are in m and m/s.</summary>
 public readonly record struct ConstrainedStepDiagnostics(int MidpointIterations, double MidpointScaledResidual,
     int PositionProjectionIterations, int VelocityProjectionIterations,
-    double BeforeProjectionPositionError, double BeforeProjectionVelocityError);
+    double BeforeProjectionPositionError, double BeforeProjectionVelocityError)
+{
+    /// <summary>Actual axle misalignment before numerical projection (rad).</summary>
+    public double BeforeProjectionAngularPositionError { get; internal init; }
+    /// <summary>Alignment-row rate norm before numerical projection (1/s).</summary>
+    public double BeforeProjectionAngularVelocityError { get; internal init; }
+}
 
 public sealed class ConstrainedStepResult
 {

@@ -11,6 +11,7 @@ public sealed class ConstrainedSolverSettings
 {
     public static ConstrainedSolverSettings Default { get; } = new();
 
+    public AngularConstraintSettings AngularConstraints { get; }
     public double PositionTolerance { get; }
     public double VelocityTolerance { get; }
     public double NonlinearTolerance { get; }
@@ -35,7 +36,21 @@ public sealed class ConstrainedSolverSettings
         int maxNonlinearIterations = 20,
         int maxProjectionIterations = 12,
         int maxLineSearchIterations = 12)
+        : this(AngularConstraintSettings.Default, positionTolerance, velocityTolerance, nonlinearTolerance,
+            linearSolveTolerance, minimumScaledPivot, linearVelocityScale, angularVelocityScale, finiteDifferenceStep,
+            maxNonlinearIterations, maxProjectionIterations, maxLineSearchIterations)
     {
+    }
+
+    public ConstrainedSolverSettings(AngularConstraintSettings angularConstraints,
+        double positionTolerance = 1e-10, double velocityTolerance = 1e-10,
+        double nonlinearTolerance = 1e-11, double linearSolveTolerance = 1e-11,
+        double minimumScaledPivot = 1e-12, double linearVelocityScale = 1, double angularVelocityScale = 1,
+        double finiteDifferenceStep = 6e-6, int maxNonlinearIterations = 20,
+        int maxProjectionIterations = 12, int maxLineSearchIterations = 12)
+    {
+        ArgumentNullException.ThrowIfNull(angularConstraints);
+        AngularConstraints = angularConstraints;
         RequirePositive(positionTolerance, nameof(positionTolerance));
         RequirePositive(velocityTolerance, nameof(velocityTolerance));
         RequirePositive(nonlinearTolerance, nameof(nonlinearTolerance));

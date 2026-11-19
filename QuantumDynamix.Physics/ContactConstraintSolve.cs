@@ -13,6 +13,8 @@ internal sealed class ContactConstraintSolve
     internal double[] Multipliers { get; }
     internal int Iterations { get; }
     internal double FeasibilityError { get; }
+    internal double AngularFeasibilityError { get; }
+    internal double ScaledFeasibilityError { get; }
     internal double NegativeImpulse { get; }
     internal double ComplementarityError { get; }
     internal double LinearError { get; }
@@ -21,10 +23,14 @@ internal sealed class ContactConstraintSolve
 
     internal ContactConstraintSolve(MultibodySystem system, double[,] rows, int equalities, double[] lower,
         double[] free, ContactSolverSettings settings, double feasibilityTolerance, double dualTolerance,
-        string stage, bool checkReactionRank = false)
+        string stage, bool checkReactionRank = false, bool[]? angularRows = null,
+        double angularFeasibilityTolerance = 0, bool positionCorrection = false)
     {
         int count = rows.GetLength(0);
         int dimension = free.Length;
+        bool mixed = angularRows is not null && angularRows.Any(value => value);
+        if (mixed && !(angularFeasibilityTolerance > 0 && double.IsFinite(angularFeasibilityTolerance)))
+        { throw new ArgumentOutOfRangeException(nameof(angularFeasibilityTolerance)); }
         double[,] response = new double[dimension, count];
         for (int body = 0; body < system.Bodies.Count; body++)
         {
@@ -96,26 +102,46 @@ internal sealed class ContactConstraintSolve
         for (int i = 0; i < dimension; i++) { values[i] = free[i] + change[i]; }
         double[] errors = ConstrainedLinearAlgebra.Multiply(rows, values);
         double feasibility = 0;
+        double angularFeasibility = 0;
+        double scaledFeasibility = 0;
         double negative = 0;
+        double scaledNegative = 0;
         double complementarity = 0;
         var tight = new List<int>(Enumerable.Range(0, equalities));
-        double pScale = System.Math.Max(dualTolerance, ConstrainedLinearAlgebra.MaxAbs(p));
-        double vScale = System.Math.Max(feasibilityTolerance, ConstrainedLinearAlgebra.MaxAbs(offset));
+        // Couple multipliers and angular residuals have different units. Never include them
+        // in the force-impulse/normal-speed scales used for contact complementarity.
+        double pScale = positionCorrection ? 0 : dualTolerance;
+        double vScale = feasibilityTolerance;
+        for (int i = 0; i < count; i++)
+        {
+            if (IsAngular(i)) { continue; }
+            pScale = System.Math.Max(pScale, System.Math.Abs(p[i]));
+            vScale = System.Math.Max(vScale, System.Math.Abs(offset[i]));
+            if (i >= equalities) { pScale = System.Math.Max(pScale, DualTolerance(i)); }
+        }
         for (int i = 0; i < count; i++)
         {
             errors[i] -= lower[i];
-            feasibility = System.Math.Max(feasibility, i < equalities ? System.Math.Abs(errors[i]) : -errors[i]);
+            double violation = i < equalities ? System.Math.Abs(errors[i]) : System.Math.Max(0, -errors[i]);
+            scaledFeasibility = System.Math.Max(scaledFeasibility, violation / RowTolerance(i));
+            if (IsAngular(i)) { angularFeasibility = System.Math.Max(angularFeasibility, violation); }
+            else { feasibility = System.Math.Max(feasibility, violation); }
             if (i >= equalities)
             {
                 negative = System.Math.Max(negative, -p[i]);
+                scaledNegative = System.Math.Max(scaledNegative, -p[i] / DualTolerance(i));
                 complementarity = System.Math.Max(complementarity, System.Math.Abs((p[i] / pScale) * (errors[i] / vScale)));
-                if (p[i] > dualTolerance && System.Math.Abs(errors[i]) > feasibilityTolerance)
+                if (p[i] > DualTolerance(i) && System.Math.Abs(errors[i]) > feasibilityTolerance)
                 { throw new ContactSolveException(ContactSolveFailure.LinearSolve, stage, "Active contact fails complementarity feasibility (stage units).", residual: errors[i]); }
                 if (System.Math.Abs(errors[i]) <= feasibilityTolerance) { tight.Add(i); }
             }
         }
-        if (feasibility > feasibilityTolerance || negative > dualTolerance)
-        { throw new ContactSolveException(ContactSolveFailure.LinearSolve, stage, "Discrete constraint feasibility failed (stage units).", residual: feasibility); }
+        if (scaledFeasibility > 1 || scaledNegative > 1)
+        {
+            throw new ContactSolveException(ContactSolveFailure.LinearSolve, stage,
+            mixed ? "Discrete constraint feasibility failed (tolerance-scaled linear/angular rows)." : "Discrete constraint feasibility failed (stage units).",
+            residual: mixed ? System.Math.Max(scaledFeasibility, scaledNegative) : feasibility);
+        }
         // A conservative rank policy: every tight potential support must be independently resolved.
         // Do not publish an arbitrary basis-dependent distribution among redundant rigid contacts.
         if (checkReactionRank) { Factor(tight.ToArray()); }
@@ -147,11 +173,25 @@ internal sealed class ContactConstraintSolve
         Multipliers = p;
         Iterations = iteration;
         FeasibilityError = feasibility;
+        AngularFeasibilityError = angularFeasibility;
+        ScaledFeasibilityError = scaledFeasibility;
         NegativeImpulse = negative;
         ComplementarityError = complementarity;
         LinearError = linearError;
         MomentumError = momentumError;
         MinimumPivot = minimumPivot;
+
+        bool IsAngular(int row) => row < equalities && angularRows is not null && angularRows[row];
+        double RowTolerance(int row) => IsAngular(row) ? angularFeasibilityTolerance : feasibilityTolerance;
+        // A position projection multiplier has units kg*m, rather than N*s. Use the
+        // displacement tolerance and single-row inverse effective mass for its numerical floor.
+        double DualTolerance(int row)
+        {
+            double tolerance = positionCorrection ? feasibilityTolerance / w[row, row] : dualTolerance;
+            if (!(tolerance > 0 && double.IsFinite(tolerance)))
+            { throw new ArithmeticException("The numerical dual tolerance is not representable in the stage's units."); }
+            return tolerance;
+        }
 
         ConstraintCholesky Factor(int[] indices)
         {

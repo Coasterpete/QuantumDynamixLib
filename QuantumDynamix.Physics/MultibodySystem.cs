@@ -9,16 +9,26 @@ namespace QuantumDynamix.Physics;
 /// <remarks>The ideal joint permits all relative rotations and transmits no independent couple.</remarks>
 public readonly record struct SphericalJoint(int BodyA, int BodyB, Vector3d LocalAnchorA, Vector3d LocalAnchorB);
 
-/// <summary>Immutable ordered definitions for finite-mass bodies and spherical joints.</summary>
+/// <summary>Immutable ordered definitions for finite-mass bodies, spherical joints, and revolute joints.</summary>
 public sealed class MultibodySystem
 {
     public ReadOnlyCollection<RigidBodyMassProperties> Bodies { get; }
     public ReadOnlyCollection<SphericalJoint> Joints { get; }
+    public ReadOnlyCollection<RevoluteJoint> RevoluteJoints { get; }
+    /// <summary>Scalar rows: three per spherical joint followed by five per revolute joint.</summary>
+    public int BilateralConstraintCount => checked(3 * Joints.Count + 5 * RevoluteJoints.Count);
 
     public MultibodySystem(IEnumerable<RigidBodyMassProperties> bodies, IEnumerable<SphericalJoint> joints)
+        : this(bodies, joints, Array.Empty<RevoluteJoint>())
+    {
+    }
+
+    public MultibodySystem(IEnumerable<RigidBodyMassProperties> bodies, IEnumerable<SphericalJoint> joints,
+        IEnumerable<RevoluteJoint> revoluteJoints)
     {
         ArgumentNullException.ThrowIfNull(bodies);
         ArgumentNullException.ThrowIfNull(joints);
+        ArgumentNullException.ThrowIfNull(revoluteJoints);
         RigidBodyMassProperties[] bodyArray = new List<RigidBodyMassProperties>(bodies).ToArray();
         if (bodyArray.Length == 0)
         {
@@ -40,8 +50,21 @@ public sealed class MultibodySystem
             }
         }
 
+        RevoluteJoint[] revoluteArray = new List<RevoluteJoint>(revoluteJoints).ToArray();
+        foreach (RevoluteJoint joint in revoluteArray)
+        {
+            if ((uint)joint.BodyA >= (uint)bodyArray.Length || (uint)joint.BodyB >= (uint)bodyArray.Length
+                || joint.BodyA == joint.BodyB)
+            {
+                throw new ArgumentException("Each joint must reference two distinct existing bodies.", nameof(revoluteJoints));
+            }
+            joint.LocalFrameA.Validate(nameof(revoluteJoints));
+            joint.LocalFrameB.Validate(nameof(revoluteJoints));
+        }
+
         Bodies = Array.AsReadOnly(bodyArray);
         Joints = Array.AsReadOnly(jointArray);
+        RevoluteJoints = Array.AsReadOnly(revoluteArray);
     }
 
     internal void ValidateState(MultibodyState state)

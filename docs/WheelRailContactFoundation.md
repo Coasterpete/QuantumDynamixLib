@@ -16,7 +16,7 @@ force/integration path; its physical compression is not rigid penetration correc
 - Stationary rails and explicit owner-authored wheel/rail pair bindings.
 - Finite-width circularly crowned treads rigidly mounted to existing body COM frames.
 - Frictionless rigid unilateral normal contact, with inelastic discrete impacts.
-- The existing spherical joints, solved together with contact impulses.
+- Spherical and revolute joints, solved together with contact impulses.
 - Arbitrary definition counts and body assignments, including single, dual, and
   asymmetric rail arrangements, subject to determinate, numerically resolved rows.
 
@@ -25,13 +25,16 @@ opposing surface determine the force direction. A side wheel supplies normal
 lateral guidance without tangential friction. There are no manufacturer presets,
 gauge assumptions, wheel-count templates, or automatic bogie construction.
 
-Independent wheel spin, revolute joints, friction, suspension, elastic contact,
+Independent wheel spin is available through explicit wheel bodies and the
+[revolute-joint foundation](RevoluteJointFoundation.md). Existing mounted-wheel
+definitions retain their meaning. Friction, suspension, elastic contact,
 preload distribution, derailment rules, animation, and rendering are absent from
 this rigid path. The separate compliant path supplies local normal deformation
 and owner-parameterized load sharing.
 Owners supply the body's mass and inertia, including whatever mounted mass their
 model represents. Axisymmetric tread geometry needs no spin coordinate, but this
-does not model an independently spinning wheel's inertia or gyroscopic effects.
+does not by itself model an independently spinning wheel's inertia or gyroscopic
+effects; those belong to the explicit wheel body and its bearing constraints.
 
 ## Definitions, units, and immutability
 
@@ -163,7 +166,10 @@ p_n >= 0, w >= 0, p_n*w = 0           // componentwise
 ```
 
 `p_b` are unrestricted joint impulses and `p_n` nonnegative normal impulses.
-Both have units N*s. C_b is the existing spherical-joint attachment error.
+Spherical and hinge point impulses have units N*s; hinge couple impulses have
+units N*m*s. The original spherical target shown above is unchanged. New hinge
+rows use their analytic acceleration bias in `J_h*u_end=-C_h/h-h*b_h`; see the
+revolute foundation for this first-order extension and angular tolerances.
 The contact row, using body-local arm r_local and body-to-world rotation R, is
 `[n^T, (r_local cross R^T*n)^T]`. It correctly couples world translation and body
 angular velocity, and its transpose supplies forces and moments in those frames.
@@ -251,7 +257,7 @@ These backward errors are not forward-error or condition-number estimates.
 
 `ContactSolveException` records failure, stage, iterations, residual, geometry IDs
 where applicable, and the inner numerical cause. Integrator failures include
-ordered `InvolvedPairs`: contact row k follows the 3*joint-count bilateral rows
+ordered `InvolvedPairs`: contact row k follows `Dynamics.BilateralConstraintCount` bilateral rows
 and corresponds to pair k. Invalid input definitions/counts/controls use argument
 exceptions. Solver/query failures never return a partially advanced state; input
 snapshots remain unchanged. No fallback contact law or fabricated zero reaction is

@@ -18,21 +18,24 @@ Implemented in the current library:
   section roll, surface queries, explicit spacing/gauge measurements, independent
   spine/rail distance maps, and geometric diagnostics.
 - **Dynamics foundations:** unconstrained Newton-Euler rigid-body dynamics with
-  RK4 integration, plus spherical-joint multibody dynamics and projected
+  RK4 integration, plus spherical/revolute multibody dynamics and projected
   implicit-midpoint integration.
+- **Revolute joints and independent wheel spin:** body-local attachment frames,
+  one free relative rotation, explicit wheel-body mass and full inertia, wrapped
+  angle/rate queries, bearing forces/couples, and physical gyroscopic coupling.
 - **Wheel/rail contact geometry:** owner-defined crowned treads, declared smooth
   stationary rail patches and material sides, bounded signed-gap searches,
   surface normals, contact witnesses, and relative material-point velocities.
 - **Rigid normal contact:** frictionless unilateral normal impulses coupled to
-  spherical joints, inelastic discrete impacts, separation, step-average loads,
-  and separate first-order stepping for determinate contact reactions.
+  spherical and revolute joints, inelastic discrete impacts, separation,
+  step-average loads, and separate first-order stepping for determinate contact reactions.
 - **Compliant normal contact:** explicit owner-supplied power-law coefficients,
   compression-only non-attractive damping, deformation-dependent wheel-load
   sharing, instantaneous forces and elastic energy, and a separate integration
   path using the existing projected implicit-midpoint joint solver.
 
 Future application functionality, including FVD reconstruction, complete coaster
-simulation, friction, suspension, revolute joints, independent wheel spin,
+simulation, friction, traction, braking mechanisms, suspension, automatic no-slip rolling,
 derailment modeling, train animation, rendering, and UI, is not implemented here.
 Rail geometry queries do not advance vehicles or apply contact forces. Contact stepping does not prescribe
 a spline-following trajectory.
@@ -57,6 +60,12 @@ documents the force law, physical parameter limits, energy diagnostics, and
 analytical load-sharing regressions. Physical compression is retained; numerical
 joint corrections are reported separately. Real-wheel coefficients and impact
 accuracy require physical evidence beyond these synthetic regression cases.
+
+The [revolute-joint foundation](docs/RevoluteJointFoundation.md) documents the
+five constraint equations, analytic derivatives, reaction units, numerical
+controls, and regressions. Start with the short programs below, then use the
+[practical revolute-joint guide](docs/RevoluteJointExamples.md) for accumulated
+turns, paired axle torques, gyroscopic bearing reactions, and normal contact.
 
 ## Quick start
 
@@ -91,7 +100,8 @@ for Release builds, formatting checks, and editor setup.
 
 ## Usage examples
 
-The vector, spline, and physical-rail blocks are independent console programs.
+The vector, spline, physical-rail, and introductory revolute blocks are independent
+console programs.
 The later contact programs use the explicitly provided shared example setup.
 Geometry inputs below are illustrative caller-supplied values in metres, not
 library defaults or manufacturer dimensions. `Vector3d` stores numbers without attaching units;
@@ -238,6 +248,107 @@ separate `Validate()` inspection. See [Physical rail geometry](docs/PhysicalRail
 for validation units and limits, surface queries, gauge datums, distance inversion,
 and caller-defined profiles. This example defines geometry only; it does not
 model wheel/rail contact or guide a vehicle.
+
+### Body-local revolute joint frames
+
+A revolute joint keeps two attachment points together and aligns their axles,
+leaving one relative rotation free. Each attachment is a `RigidPose3d` in its
+body's center-of-mass frame. Here both attachment +X axes point along body +Y,
+and the two local offsets meet halfway between the body centers.
+
+<!-- example: readme-revolute-frames -->
+```csharp
+using System;
+using QuantumDynamix.Geometry;
+using QuantumDynamix.Math;
+using QuantumDynamix.Physics;
+
+Quaterniond axleAlongY = Quaterniond.FromAxisAngle(Vector3d.UnitZ, System.Math.PI / 2);
+var joint = new RevoluteJoint(0, 1,
+    new RigidPose3d(new Vector3d(0, 0.5, 0), axleAlongY),
+    new RigidPose3d(new Vector3d(0, -0.5, 0), axleAlongY));
+var system = new MultibodySystem(new[]
+{
+    new RigidBodyMassProperties(2, Matrix3x3d.Diagonal(2, 3, 4)),
+    new RigidBodyMassProperties(3, Matrix3x3d.Diagonal(3, 4, 5))
+}, Array.Empty<SphericalJoint>(), new[] { joint });
+var state = new MultibodyState(new[]
+{
+    new RigidBodyState(RigidPose3d.Identity, Vector3d.Zero, Vector3d.Zero),
+    new RigidBodyState(new RigidPose3d(new Vector3d(0, 1, 0),
+        Quaterniond.FromAxisAngle(Vector3d.UnitY, 0.3)), Vector3d.Zero, new Vector3d(0, 2, 0))
+});
+
+RevoluteJointSample sample = RevoluteJointKinematics.Evaluate(system, state, jointIndex: 0);
+Console.WriteLine($"Wrapped angle: {sample.Angle:F3} rad");
+Console.WriteLine($"Relative angular velocity: {sample.AngularRate:F3} rad/s");
+Console.WriteLine($"World axle: ({sample.WorldAxis.X:F3}, {sample.WorldAxis.Y:F3}, {sample.WorldAxis.Z:F3})");
+```
+
+The angle is 0.300 rad, relative angular velocity is 2.000 rad/s, and world axle
+is `(0, 1, 0)` to roundoff. A radian measures angle: pi radians is 180 degrees
+and 2*pi radians is one revolution. Positive angle turns body B relative to A
+by the right-hand rule about the directed axle. `jointIndex` indexes
+`RevoluteJoints`; the existing `Joints` collection remains spherical-only.
+The empty spherical array leaves only the revolute joint, and body indices 0/1
+match the mass/state array order. These are finite bodies; the joint does not
+fix either one to the world.
+
+### Independent wheel spin
+
+Give the wheel its own rigid body and full inertia tensor, then attach its tread
+geometry to that body. This free-space example supplies a 2 kg carrier and a
+separate 0.5 kg wheel. The wheel body's local +X is its axle; its world pose
+rotates that direction onto +Y. The carrier's local attachment lies 1 m along +Y.
+
+<!-- example: readme-independent-wheel -->
+```csharp
+using System;
+using QuantumDynamix.Geometry;
+using QuantumDynamix.Math;
+using QuantumDynamix.Physics;
+
+Quaterniond axleAlongY = Quaterniond.FromAxisAngle(Vector3d.UnitZ, System.Math.PI / 2);
+var system = new MultibodySystem(new[]
+{
+    new RigidBodyMassProperties(2, Matrix3x3d.Diagonal(2, 2, 2)),
+    new RigidBodyMassProperties(0.5, Matrix3x3d.Diagonal(0.02, 0.03, 0.03))
+}, Array.Empty<SphericalJoint>(), new[]
+{
+    new RevoluteJoint(0, 1,
+        new RigidPose3d(Vector3d.UnitY, axleAlongY), RigidPose3d.Identity)
+});
+var wheel = new WheelDefinition("wheel", bodyIndex: 1, RigidPose3d.Identity,
+    new CrownedWheelTread(radius: 0.2, halfWidth: 0.08, crownRadius: 0.4));
+var velocity = new Vector3d(10, 0, 0); // world m/s
+var state = new MultibodyState(new[]
+{
+    new RigidBodyState(RigidPose3d.Identity, velocity, Vector3d.Zero),
+    new RigidBodyState(new RigidPose3d(Vector3d.UnitY, axleAlongY),
+        velocity, new Vector3d(5, 0, 0)) // wheel-body rad/s; world rotation is about +Y
+});
+
+state = ConstrainedMultibodyIntegrator.Step(system, state, 0, 0.001,
+    (_, _) => new RigidBodyLoads[2]).State;
+RevoluteJointSample sample = RevoluteJointKinematics.Evaluate(system, state, 0);
+Console.WriteLine($"Carrier speed: {state.Bodies[0].LinearVelocity.X:F3} m/s");
+Console.WriteLine($"Independent wheel spin: {sample.AngularRate:F3} rad/s");
+Console.WriteLine($"No-slip comparison only: {state.Bodies[0].LinearVelocity.X / wheel.Tread.Radius:F3} rad/s");
+```
+
+The wheel keeps 5.000 rad/s while the carrier moves at 10.000 m/s. The printed
+50.000 rad/s comparison is `v/r`; it is never assigned to the wheel. A free
+bearing permits spin and does not impose no-slip rolling. The
+[normal-contact program](docs/RevoluteJointExamples.md#4-rigid-and-compliant-normal-contact)
+demonstrates this distinction while the rail actually supports the wheel.
+
+`BodyAngularVelocity` uses body coordinates; linear velocity uses world coordinates.
+The query calculates `dot(worldAxle, omegaB_world - omegaA_world)`, so it remains
+correct when the bodies have different orientations. `WheelDefinition` supplies
+geometry, while `RigidBodyMassProperties` supplies mass and COM inertia in kg*m^2.
+The 0.02 entry resists rotation about wheel-body +X; the full tensor also governs
+turning and tilting. The carrier properties exclude this wheel's mass and inertia.
+All values here are supplied examples, not geometry-derived inertia or presets.
 
 ### Wheel/rail contact examples
 
@@ -539,16 +650,16 @@ conventions. No package dependency was added.
 
 ### Definitions, state, and reactions
 
-`MultibodySystem` copies ordered mass properties and spherical joints;
+`MultibodySystem` copies ordered mass properties and joint definitions;
 `MultibodyState` copies the corresponding `RigidBodyState` values. Collections
 are read-only, and the contained properties and values are immutable. Body
 indices refer to this fixed order. All bodies have finite positive mass and
 numerically positive-definite inertia; no fixed-world body representation is
 provided. A system can have disconnected bodies and any number of independent
-spherical-joint rows. Redundant rows are explicitly rejected.
+spherical/revolute constraint rows. Redundant rows are explicitly rejected.
 
-For each body, `x` is its world center of mass, `R` maps body directions to world
-directions, and `s` is its local attachment offset in metres. The joint imposes
+For a spherical joint, `x` is each body's world center of mass, `R` maps body
+directions to world directions, and `s` is its local attachment offset in metres. The joint imposes
 `C = x_A + R_A*s_A - x_B - R_B*s_B = 0`. This is three scalar constraints,
 leaving all relative rotations free. Stacking world linear and body angular
 velocities into `u` gives:
@@ -569,9 +680,9 @@ u_dot = a_free + M^-1*J^T*lambda
 Inverse-mass applications use division by mass and cached body-inertia solves;
 no matrix inverse is explicitly formed. All joint rows are solved together,
 including coupling through shared bodies. `ConstraintAssembly` holds the row
-construction internally so additional joint equations can use the same dynamics
-and mass operations when separately authorized. Current public joints are
-spherical joints only.
+construction internally. Revolute joints use the same dynamics and mass operations,
+adding two axle-alignment equations to the three point equations; see the
+[revolute foundation](docs/RevoluteJointFoundation.md#five-constraints-and-their-derivatives).
 
 `ConstrainedMultibodyDynamics.Evaluate` returns derivatives, resultant constraint
 loads per body, reactions per joint, and residual diagnostics. It evaluates the
@@ -579,8 +690,8 @@ acceleration-level extension at the supplied snapshot, including off-manifold
 snapshots; inspect its reported position and velocity errors. It does not
 assemble initial data or advance time.
 
-Each joint's `ForceOnA` is `lambda` in world newtons, and `ForceOnB` is its
-negative. COM torques are `(R_A*s_A) x lambda` and `(R_B*s_B) x (-lambda)` in
+Each spherical joint's `ForceOnA` is `lambda` in world newtons, and `ForceOnB`
+is its negative. COM torques are `(R_A*s_A) x lambda` and `(R_B*s_B) x (-lambda)` in
 world N*m. The spherical joint has no independent rotational couple.
 
 ### Integration and quaternion treatment
@@ -605,7 +716,8 @@ construction normalizes physical views. It is second order, with phase error
 when angular displacement per step is too large.
 
 After the midpoint solve, mass/inertia-weighted Newton position projection
-reduces attachment gaps, using right-multiplied axis-angle quaternion corrections.
+reduces attachment gaps and revolute axle misalignment, using right-multiplied
+axis-angle quaternion corrections.
 Velocity projection then reduces `J*u` at the corrected poses. These numerical
 operations do not add stiffness or compliance. Body angular velocity components
 are held during position projection and subsequently velocity-projected;
@@ -669,6 +781,13 @@ allow independent control of the following provisional defaults:
 | `MaxNonlinearIterations` | `20` | Maximum Newton corrections per step |
 | `MaxProjectionIterations` | `12` | Maximum corrections for each projection |
 | `MaxLineSearchIterations` | `12` | Full step followed by up to 11 halvings |
+
+Revolute joints also use `AngularConstraintSettings`: provisional defaults are
+1e-10 rad axle misalignment and 1e-10 1/s alignment-row rate (forbidden rad/s at
+alignment). A `ConstrainedSolverSettings` overload accepts these settings through
+its `angularConstraints` argument. Angular diagnostics and tolerances are separate
+from the metre-valued attachment errors above; see
+[angular numerical controls](docs/RevoluteJointFoundation.md#numerical-controls-and-limits).
 
 Each velocity scale is the maximum of its floor, initial vector speed, and
 `h*initial_acceleration_length`; it stays fixed throughout a step. The Newton
@@ -753,6 +872,66 @@ Spline and rail geometry are implemented separately as described above.
 Useful mathematical references are
 [MIT's bilateral constraint equations](https://underactuated.mit.edu/multibody.html)
 and [Hairer's projection analysis](https://www.unige.ch/~hairer/preprints/symproj.pdf).
+
+## Revolute joints and independent wheel spin
+
+The [introductory programs](#body-local-revolute-joint-frames) use the implemented
+five-row joint: three equations keep attachment origins together and two align
+their directed +X axles. Relative axial rotation is free. Initial attachment
+positions, axle directions, and constrained velocities must be consistent;
+antiparallel/singular configurations and unresolved solves fail explicitly.
+
+`RevoluteJointKinematics.Evaluate` returns `Angle` in (-pi,pi] radians,
+`AngularRate` in relative rad/s, and `WorldAxis` as a world unit direction. A
+rotating carrier contributes to the wheel's absolute angular velocity; relative
+spin measures only B's motion along the axle relative to A.
+
+An orientation snapshot does not count complete turns. Keep an application-owned
+angle history and update it with `RevoluteJointKinematics.UnwrapAngle` only after
+accepting a step. Changes must be resolved to less than pi radians between samples;
+the helper cannot detect missed full turns. Divide accumulated angle change by
+`2 * System.Math.PI` for revolutions since the initial sample. The
+[complete history program](docs/RevoluteJointExamples.md#1-wrapped-angle-and-accumulated-revolutions)
+keeps that history outside the pure load callback.
+
+An applied axle torque T on the wheel needs -T on its carrier when representing
+an internal shaft action. `RigidBodyLoads.Torque` is a world COM torque in N*m.
+The [paired-torque program](docs/RevoluteJointExamples.md#2-applying-an-axle-torque)
+shows the wheel accelerate and the finite carrier respond in the opposite
+direction. This demonstrates explicit supplied loads, not a built-in motor or
+braking mechanism.
+
+`ConstrainedMultibodyDynamics.Evaluate(...).RevoluteJointReactions` reports
+instantaneous `ForceOnA/B` in N, independent `CoupleOnA/B` in N*m, and
+`TorqueOnA/B` about the respective COMs in N*m. Force and couple have opposite
+signs on the two bodies; the total COM torque includes the attachment force's
+lever-arm moment: `torque = arm cross force + couple`. The ideal bearing couple
+has no axial component on an assembled hinge. See the
+[bearing-force and gyroscopic-couple program](docs/RevoluteJointExamples.md#3-bearing-forces-and-gyroscopic-couples).
+
+A wheel's spin angular momentum about its COM is `H = R * I_body * omega_body`.
+Turning its axle changes H's direction, requiring torque and producing a bearing
+reaction on the carrier. The existing full Newton-Euler equations supply this
+gyroscopic coupling. Do not add another gyroscopic torque to the callback.
+
+Both normal-contact paths use the wheel body's complete angular motion. The
+rigid result exposes `RevoluteJointImpulses`: force impulses are N*s, couple/COM
+angular impulses are N*m*s, and division by the step gives an average load.
+The compliant result exposes instantaneous endpoint bearing reactions through
+`JointStep.AcceptedDynamics.RevoluteJointReactions` while retaining physical
+compression. Numerical projection corrections remain separate from physical loads.
+Neither normal-contact path implements tangential friction or enforces `v/r`.
+
+Fast spin needs a timestep-refinement study. Halve h and compare accumulated
+phase, velocities, individual reactions, and energy for the same initial state
+and duration. Small constraint residuals alone do not establish accuracy. The
+[fast-spin program](docs/RevoluteJointExamples.md#5-refining-the-timestep-for-fast-spin)
+shows phase error decrease under refinement; tightening angular tolerances alone
+does not remove that integration error. The midpoint and smooth compliant paths
+are second order under their documented conditions; rigid contact remains first
+order. Contact travel limits also count axle spin. See the
+[engineering foundation](docs/RevoluteJointFoundation.md) for the mathematics,
+measured regressions, geometry limits, and failure behavior.
 
 ## Wheel/rail contact foundation
 

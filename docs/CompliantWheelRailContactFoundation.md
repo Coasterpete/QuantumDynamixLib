@@ -2,8 +2,10 @@
 
 This implements the owner-approved optional normal-compliance formulation in the
 existing core assembly. The rigid impulse solver remains a separate formulation.
-No dependencies, assemblies, suspension mechanisms, friction, independent wheel
-spin, revolute joints, material presets, or vehicle-guidance rules were added.
+No dependencies, assemblies, suspension mechanisms, friction, material presets,
+or vehicle-guidance rules were added by the normal law. Explicit independently
+spinning wheel bodies and general-purpose revolute joints are supported through
+the separate [revolute foundation](RevoluteJointFoundation.md).
 
 ## Physical scope
 
@@ -17,7 +19,9 @@ one body or to articulated bodies. Independent springs on multiple contacts of
 one deforming tread could double-count shared deformation and are not supported.
 Rails remain stationary and rigid; wheel geometry remains rigidly mounted to its
 existing COM frame. Owner-supplied body mass and full inertia retain their current
-meaning. There are no additional deformation or wheel-spin state coordinates.
+meaning. There are no additional deformation coordinates. Independent wheel
+spin resides in the wheel body's existing orientation/angular velocity; the
+normal law adds no separate spin coordinate or inertia.
 
 All existing geometric restrictions still apply: isolated smooth tread-interior
 witnesses, explicit rail material sides, restricted smooth patches, bounded
@@ -163,7 +167,7 @@ J*uDot + joint_bias = 0
 ```
 
 N maps generalized velocity to contact normal velocity; J remains the existing
-spherical-joint Jacobian. World linear velocity and body angular velocity,
+bilateral Jacobian, including spherical and revolute rows. World linear velocity and body angular velocity,
 right-handed rotations, full body inertia, normalized physical quaternion views,
 and SI double-precision calculations retain their existing meanings. Contact
 loads affect all joint reactions through the existing coupled solve. No compliant
