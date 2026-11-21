@@ -118,6 +118,70 @@ public sealed class EasingTimelineTests
     }
 
     [TestMethod]
+    public void SegmentUsesAuthoredNormalizedBreakpointOnlyAtItsExactMappedCoordinate()
+    {
+        var segment = new FunctionSegment(10, 14, new CustomFunction(0, 1, Kink, new[] { 0.2 }));
+        var timeline = new ScalarTimeline(ProfileDomain.Distance, new[] { segment });
+        double point = timeline.Breakpoints.Single();
+
+        Assert.AreEqual(10.8, point);
+        Assert.AreNotEqual(0.2, (point - 10) / 4);
+        Assert.AreEqual(new ScalarJet(0, 0), timeline.Evaluate(point, EvaluationSide.Left));
+        Assert.AreEqual(new ScalarJet(0, 0.25), timeline.Evaluate(point, EvaluationSide.Right));
+        Assert.AreEqual(0, timeline.Evaluate(point).DerivativeOrder);
+        Assert.AreEqual(new ContinuityDiagnostic(point, 0), timeline.ValidateContinuity(1).Single());
+        Assert.AreEqual(0, timeline.Evaluate(System.Math.BitDecrement(point), EvaluationSide.Right).FirstDerivative);
+        Assert.AreEqual(0.25, timeline.Evaluate(System.Math.BitIncrement(point), EvaluationSide.Left).FirstDerivative);
+
+        static ScalarJet Kink(double x, EvaluationSide side)
+        {
+            const double breakpoint = 0.2;
+            if (x == breakpoint && side == EvaluationSide.Automatic) { return new(0, derivativeOrder: 0); }
+            return x > breakpoint || (x == breakpoint && side == EvaluationSide.Right) ? new(x - breakpoint, 1) : new(0);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(EasingDirection.Out, 0.8)]
+    [DataRow(EasingDirection.InOut, 0.9)]
+    public void ReflectedCustomEasingPreservesExactBreakpointAndReversesLimits(EasingDirection direction, double point)
+    {
+        var easing = EasingFunction.Custom(Kink, direction, new[] { 0.2 });
+        var segment = FunctionSegment.Transition(10, 14, 0, 1, easing);
+        double station = segment.Breakpoints[^1];
+
+        Assert.AreEqual(point, easing.Breakpoints[^1]);
+        Assert.AreEqual(new ScalarJet(1, 1.25), easing.Evaluate(point, EvaluationSide.Left));
+        Assert.AreEqual(new ScalarJet(1, 0), easing.Evaluate(point, EvaluationSide.Right));
+        Assert.AreEqual(new ScalarJet(1, 0.3125), segment.Evaluate(station, EvaluationSide.Left));
+        Assert.AreEqual(new ScalarJet(1, 0), segment.Evaluate(station, EvaluationSide.Right));
+        Assert.AreEqual(0, segment.Evaluate(station).DerivativeOrder);
+
+        static ScalarJet Kink(double x, EvaluationSide side)
+        {
+            const double breakpoint = 0.2;
+            const double slope = 1.25;
+            if (x == breakpoint && side == EvaluationSide.Automatic) { return new(0, derivativeOrder: 0); }
+            return x > breakpoint || (x == breakpoint && side == EvaluationSide.Right)
+                ? new((x - breakpoint) * slope, slope) : new(0);
+        }
+    }
+
+    [TestMethod]
+    public void RoundedBreakpointCollisionsKeepOrdinaryEndpointAndCoordinateEvaluation()
+    {
+        double middle = System.Math.BitIncrement(1);
+        double end = System.Math.BitIncrement(middle);
+        var shape = new CustomFunction(0, 1, (u, _) => new(u, 1), new[] { 0.1, 0.4, 0.6, 0.9 });
+        var segment = new FunctionSegment(1, end, shape);
+
+        CollectionAssert.AreEqual(new[] { 1, middle, middle, end }, segment.Breakpoints.ToArray());
+        Assert.AreEqual(0, segment.Evaluate(1).Value);
+        Assert.AreEqual(0.5, segment.Evaluate(middle).Value);
+        Assert.AreEqual(1, segment.Evaluate(end).Value);
+    }
+
+    [TestMethod]
     public void TimelineReportsInternalEasingJoinsAsWellAsKeyframeJoins()
     {
         var timeline = new ScalarTimeline(ProfileDomain.Distance, new[] {

@@ -89,6 +89,17 @@ public sealed class CustomFunction : IScalarFunction
     }
 }
 
+internal static class BreakpointMapping
+{
+    internal static Dictionary<double, double> UniqueSources(IEnumerable<(double Mapped, double Source)> points)
+    {
+        // When rounding merges breakpoints, the mapped coordinate cannot identify a unique source.
+        return points.GroupBy(point => point.Mapped)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.First().Source);
+    }
+}
+
 internal static class Check
 {
     internal static void Finite(double value, string name)

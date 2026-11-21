@@ -14,6 +14,8 @@ public readonly record struct ContinuityDiagnostic(double Coordinate, int Contin
 /// <summary>Maps a normalized function into a physical interval and scales its value and derivatives.</summary>
 public sealed class FunctionSegment : IScalarFunction
 {
+    private readonly Dictionary<double, double>? breakpointSources;
+
     public double Minimum { get; }
     public double Maximum { get; }
     public double Offset { get; }
@@ -33,7 +35,9 @@ public sealed class FunctionSegment : IScalarFunction
         Function = function;
         Offset = offset;
         Scale = scale;
-        Breakpoints = Array.AsReadOnly(function.Breakpoints.Select(x => minimum + (maximum - minimum) * x).ToArray());
+        var points = function.Breakpoints.Select(x => (Mapped: minimum + (maximum - minimum) * x, Source: x)).ToArray();
+        Breakpoints = Array.AsReadOnly(points.Select(point => point.Mapped).ToArray());
+        breakpointSources = points.Length == 0 ? null : BreakpointMapping.UniqueSources(points);
     }
 
     public static FunctionSegment Transition(double minimum, double maximum, double from, double to, IScalarFunction? easing = null)
@@ -51,6 +55,11 @@ public sealed class FunctionSegment : IScalarFunction
         Check.Argument(argument, Minimum, Maximum, side);
         if (Scale == 0) { return new(Offset); }
         double x = argument == Maximum ? 1 : (argument - Minimum) / (Maximum - Minimum);
+        if (breakpointSources is not null && argument > Minimum && argument < Maximum
+            && breakpointSources.TryGetValue(argument, out double source))
+        {
+            x = source;
+        }
         return Function.Evaluate(x, side).Transform(Offset, Scale, 1 / (Maximum - Minimum));
     }
 }

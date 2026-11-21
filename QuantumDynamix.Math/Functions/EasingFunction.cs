@@ -11,6 +11,7 @@ public enum EasingDirection { In, Out, InOut }
 public sealed class EasingFunction : IScalarFunction
 {
     private readonly Func<double, EvaluationSide, ScalarJet>? custom;
+    private readonly Dictionary<double, double>? breakpointSources;
     private readonly double holdStart;
     private readonly double holdEnd;
     private readonly double holdValue;
@@ -19,6 +20,7 @@ public sealed class EasingFunction : IScalarFunction
     public double Minimum => 0;
     public double Maximum => 1;
     public IReadOnlyList<double> Breakpoints { get; }
+    internal (double Start, double End, double Value) PlateauParameters => (holdStart, holdEnd, holdValue);
 
     public EasingFunction(EasingKind kind = EasingKind.Linear, EasingDirection direction = EasingDirection.In,
         double holdStart = 0.25, double holdEnd = 0.75, double holdValue = 0.5)
@@ -37,10 +39,21 @@ public sealed class EasingFunction : IScalarFunction
         holdValue = h;
         this.custom = custom;
         double[] points = kind == EasingKind.Plateau ? new[] { a, b } : customBreakpoints.ToArray();
-        if (direction == EasingDirection.Out) { points = points.Select(x => 1 - x).Order().ToArray(); }
-        if (direction == EasingDirection.InOut)
-        { points = points.Select(x => x / 2).Concat(points.Select(x => 1 - x / 2)).Append(0.5).Distinct().Order().ToArray(); }
-        Breakpoints = Array.AsReadOnly(points);
+        if (direction == EasingDirection.In || points.Length == 0)
+        {
+            Breakpoints = Array.AsReadOnly(direction == EasingDirection.InOut ? new[] { 0.5 } : points);
+            return;
+        }
+
+        var mapped = direction == EasingDirection.Out
+            ? points.Select(x => (Mapped: 1 - x, Source: x))
+            : points.Select(x => (Mapped: x / 2, Source: x))
+                .Concat(points.Select(x => (Mapped: 1 - x / 2, Source: x)))
+                .Append((Mapped: 0.5, Source: 1.0));
+        var ordered = mapped.OrderBy(point => point.Mapped).ToArray();
+        breakpointSources = BreakpointMapping.UniqueSources(ordered);
+        IEnumerable<double> coordinates = ordered.Select(point => point.Mapped);
+        Breakpoints = Array.AsReadOnly((direction == EasingDirection.InOut ? coordinates.Distinct() : coordinates).ToArray());
     }
 
     public static EasingFunction Custom(Func<double, EvaluationSide, ScalarJet> function,
@@ -56,17 +69,24 @@ public sealed class EasingFunction : IScalarFunction
     {
         Check.Argument(argument, 0, 1, side);
         if (Direction == EasingDirection.In) { return Base(argument, side); }
-        if (Direction == EasingDirection.Out) { return Base(1 - argument, Reverse(side)).Transform(1, -1, -1); }
+        if (Direction == EasingDirection.Out)
+        {
+            double reflected = RestoreBreakpoint(argument, 1 - argument);
+            return Base(reflected, Reverse(side)).Transform(1, -1, -1);
+        }
         if (argument == 0.5 && side == EvaluationSide.Automatic)
         {
             ScalarJet left = Base(1, EvaluationSide.Left).Transform(0, 0.5, 2);
             ScalarJet right = Base(1, EvaluationSide.Left).Transform(1, -0.5, -2);
             return right.LimitOrder(System.Math.Max(0, Check.Continuity(left, right)));
         }
-        return argument < 0.5 || (argument == 0.5 && side == EvaluationSide.Left)
-            ? Base(2 * argument, side).Transform(0, 0.5, 2)
-            : Base(2 - 2 * argument, Reverse(side)).Transform(1, -0.5, -2);
+        bool leftHalf = argument < 0.5 || (argument == 0.5 && side == EvaluationSide.Left);
+        double x = RestoreBreakpoint(argument, leftHalf ? 2 * argument : 2 - 2 * argument);
+        return leftHalf ? Base(x, side).Transform(0, 0.5, 2) : Base(x, Reverse(side)).Transform(1, -0.5, -2);
     }
+
+    private double RestoreBreakpoint(double argument, double fallback) => argument > 0 && argument < 1
+        ? breakpointSources?.GetValueOrDefault(argument, fallback) ?? fallback : fallback;
 
     private ScalarJet Base(double x, EvaluationSide side)
     {

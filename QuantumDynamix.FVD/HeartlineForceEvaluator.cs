@@ -66,12 +66,7 @@ public static class HeartlineForceEvaluator
             throw new ArgumentException("Speed must cover the complete heartline distance interval.", nameof(heartlineSpeed));
         }
 
-        EvaluationSide limit = heartlineStation switch
-        {
-            0 => EvaluationSide.Right,
-            _ when heartlineStation == length => EvaluationSide.Left,
-            _ => side
-        };
+        EvaluationSide limit = GeometryLimit(heartlineStation, length, side);
         ScalarJet speedJet = heartlineSpeed.Evaluate(heartlineStation, limit);
         double speed = speedJet.Value;
         if (!(speed > 0))
@@ -80,6 +75,40 @@ public static class HeartlineForceEvaluator
         }
 
         double tangentialAcceleration = speed * speedJet.FirstDerivative;
+        return Project(track, heartlineStation, speed, tangentialAcceleration, worldGravity, limit);
+    }
+
+    /// <summary>Projects prescribed longitudinal motion onto the heartline, including rest and reverse motion.</summary>
+    /// <param name="track">Track supplying the heartline and its banked orientation.</param>
+    /// <param name="motion">Signed station velocity and longitudinal coordinate acceleration at a heartline station.</param>
+    /// <param name="worldGravity">Finite world gravitational acceleration in m/s².</param>
+    /// <param name="geometrySide">The geometry limit, independent of the acceleration side. Endpoints use inward limits.</param>
+    public static HeartlineForceSample Evaluate(HeartlineTrack track, LongitudinalMotionSample motion,
+        Vector3d worldGravity, EvaluationSide geometrySide)
+    {
+        ArgumentNullException.ThrowIfNull(track);
+        if (!Enum.IsDefined(geometrySide)) { throw new ArgumentOutOfRangeException(nameof(geometrySide)); }
+
+        double station = motion.HeartlineStationMetres;
+        double length = track.HeartlineStations.Length;
+        if (!double.IsFinite(station) || station < 0 || station > length)
+        { throw new ArgumentOutOfRangeException(nameof(motion), "Station must lie within the heartline."); }
+        Check.Finite(motion.HeartlineVelocityMetresPerSecond, nameof(motion));
+        Check.Finite(motion.LongitudinalAccelerationMetresPerSecondSquared, nameof(motion));
+        return Project(track, station, System.Math.Abs(motion.HeartlineVelocityMetresPerSecond),
+            motion.LongitudinalAccelerationMetresPerSecondSquared, worldGravity, GeometryLimit(station, length, geometrySide));
+    }
+
+    private static EvaluationSide GeometryLimit(double station, double length, EvaluationSide side) => station switch
+    {
+        0 => EvaluationSide.Right,
+        _ when station == length => EvaluationSide.Left,
+        _ => side
+    };
+
+    private static HeartlineForceSample Project(HeartlineTrack track, double heartlineStation, double speed,
+        double tangentialAcceleration, Vector3d worldGravity, EvaluationSide limit)
+    {
         double parameter = track.HeartlineStations.Invert(heartlineStation).Parameter;
         CurveGeometrySample geometry = CurveGeometry.Evaluate(track.Heartline, parameter, limit);
         Vector3d worldAcceleration = geometry.Tangent * tangentialAcceleration + geometry.CurvatureVector * speed * speed;
