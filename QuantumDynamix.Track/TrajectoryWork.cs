@@ -8,7 +8,7 @@ namespace QuantumDynamix.Track;
 internal sealed class TrajectoryWork(ProfileDomain domain, int maximumDepth, int maximumWork)
 {
     internal int MaximumDepth => maximumDepth;
-    private int Used { get; set; }
+    internal int Used { get; private set; }
     private int Remaining => maximumWork - Used;
 
     internal void Charge(double start, double end, int regionIndex, bool checkingPositivity = false)
