@@ -6,6 +6,7 @@ using QuantumDynamix.FVD;
 using QuantumDynamix.Geometry;
 using QuantumDynamix.Math;
 using QuantumDynamix.Math.Functions;
+using QuantumDynamix.Math.Numerics;
 using QuantumDynamix.Math.Timelines;
 using QuantumDynamix.Track;
 
@@ -28,6 +29,29 @@ internal static class HeartlineReconstructionFixtures
             MinimumForwardSpeedMetresPerSecond = minimumSpeed,
             MaximumStepMetres = maximumStep,
             MaximumWork = work
+        };
+
+    internal static HeartlineFitSettings FitSettings(double frame = 3e-6, double roll = 3e-6,
+        int maxSamples = 12_000, int maxControls = 256, int maxPasses = 10, int continuity = 2,
+        double regularity = 0.5, QuadratureSettings? length = null, double verificationSpacing = 0.3,
+        double frameTransportTolerance = 1e-9) =>
+        new()
+        {
+            PositionToleranceMetres = 3e-5,
+            TangentToleranceRadians = 4e-6,
+            CurvatureTolerancePerMetre = 4e-6,
+            BankedFrameToleranceRadians = frame,
+            BankRollToleranceRadians = roll,
+            StationDriftToleranceMetres = 3e-5,
+            CoordinateAccelerationTolerancesMetresPerSecondSquared = new(5e-4, 5e-4, 5e-4),
+            MinimumContinuousKnotOrder = continuity,
+            MinimumParameterSpeed = regularity,
+            ArcLengthSettings = length ?? new(2e-9, 0),
+            FrameTransportToleranceRadians = frameTransportTolerance,
+            MaximumVerificationSpacingMetres = verificationSpacing,
+            MaximumVerificationSamples = maxSamples,
+            MaximumControlPoints = maxControls,
+            MaximumRefinementPasses = maxPasses
         };
 
     internal static ScalarTimeline Constant(ProfileDomain domain, double start, double end, double value) =>
@@ -121,10 +145,15 @@ internal static class HeartlineReconstructionFixtures
             $"M3 {fixture} analytical residuals: position={position:G9} m, tangent vector={tangent:G9}, curvature={curvature:G9} 1/m"));
     }
 
-    internal static void Log(TestContext context, string fixture, ReconstructedHeartline source)
+    internal static void Log(TestContext context, string fixture, ReconstructedHeartline source, HeartlineFitResult? fit = null)
     {
         var d = source.Diagnostics;
         context.WriteLine(FormattableString.Invariant(
             $"M3 {fixture} reconstruction: position={d.EstimatedPositionErrorMetres:G9} m, frame={d.EstimatedFrameErrorRadians:G9} rad, curvature residual={d.MaximumObservedCurvatureResidualPerMetre:G9} 1/m, unbanked roll rate={d.MaximumObservedUnbankedRollRateRadiansPerMetre:G9} rad/m, station mapping={d.MaximumEstimatedStationMappingErrorMetres:G9} m, time mapping={d.MaximumEstimatedTimeMappingErrorSeconds:G9} s, work={d.WorkUsed}"));
+        if (fit is null) { return; }
+        var f = fit.Diagnostics;
+        Vector3d a = f.MaximumCoordinateAccelerationErrorsMetresPerSecondSquared ?? default;
+        context.WriteLine(FormattableString.Invariant(
+            $"M3 {fixture} fit: success={fit.Succeeded}, position={f.MaximumPositionErrorMetres:G9} m, tangent={f.MaximumTangentErrorRadians:G9} rad, curvature={f.MaximumCurvatureErrorPerMetre:G9} 1/m, frame={f.WorstBankedFrameError?.ErrorRadians:G9} rad, roll={f.WorstBankRollError?.SignedErrorRadians:G9} rad, station drift={f.MaximumStationDriftMetres:G9} m, length={f.LengthErrorMetres:G9} m, FVD=({a.X:G9}, {a.Y:G9}, {a.Z:G9}) m/s², samples={f.VerificationSamples}, passes={f.RefinementPasses}, failure={fit.Failure}"));
     }
 }

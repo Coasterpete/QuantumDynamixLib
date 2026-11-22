@@ -69,12 +69,17 @@ public sealed class HeartlineTrack
     public HeartlineTrack(SplineCurve3d heartline, Vector3d initialUp, TrackOffsetProfile offsets,
         IScalarFunction? banking = null, IEnumerable<TrackFeature>? features = null,
         QuadratureSettings? lengthSettings = null, double frameAngularTolerance = 1e-8)
+        : this(CreateStations(heartline, offsets, lengthSettings), initialUp, offsets, banking, features, frameAngularTolerance)
+    { }
+
+    internal HeartlineTrack(ArcLengthMap heartlineStations, Vector3d initialUp, TrackOffsetProfile offsets,
+        IScalarFunction? banking, IEnumerable<TrackFeature>? features, double frameAngularTolerance)
     {
-        ArgumentNullException.ThrowIfNull(heartline);
+        ArgumentNullException.ThrowIfNull(heartlineStations);
         ArgumentNullException.ThrowIfNull(offsets);
-        Heartline = heartline;
-        HeartlineStations = new(heartline, lengthSettings);
-        Frames = new(heartline, initialUp, frameAngularTolerance);
+        Heartline = heartlineStations.Curve;
+        HeartlineStations = heartlineStations;
+        Frames = new(Heartline, initialUp, frameAngularTolerance);
         Banking = banking ?? new CustomFunction(0, HeartlineStations.Length, (_, _) => new(0));
         Offsets = offsets;
         foreach (IScalarFunction function in new[] { Banking, offsets.Forward, offsets.Left, offsets.Up })
@@ -84,10 +89,17 @@ public sealed class HeartlineTrack
         }
         TrackFeature[] items = features?.ToArray() ?? Array.Empty<TrackFeature>();
         if (items.Any(f => f is null || string.IsNullOrWhiteSpace(f.Id) || !double.IsFinite(f.Parameter)
-            || f.Parameter < heartline.Minimum || f.Parameter > heartline.Maximum)
+            || f.Parameter < Heartline.Minimum || f.Parameter > Heartline.Maximum)
             || items.Select(f => f.Id).Distinct(StringComparer.Ordinal).Count() != items.Length)
         { throw new ArgumentException("Features require unique nonblank IDs and valid reference parameters.", nameof(features)); }
         Features = Array.AsReadOnly(items);
+    }
+
+    private static ArcLengthMap CreateStations(SplineCurve3d heartline, TrackOffsetProfile offsets, QuadratureSettings? settings)
+    {
+        ArgumentNullException.ThrowIfNull(heartline);
+        ArgumentNullException.ThrowIfNull(offsets);
+        return new(heartline, settings);
     }
 
     public FeatureStations ResolveFeatures() => new(Features.Select(f =>

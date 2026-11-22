@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using QuantumDynamix.Math;
 using QuantumDynamix.Math.Functions;
 using QuantumDynamix.Math.Timelines;
+using QuantumDynamix.Splines.Fitting;
 
 namespace QuantumDynamix.FVD;
 
@@ -25,6 +27,27 @@ public sealed class HeartlineReconstructionDiagnostics
         BankJoins { get; internal init; } = [];
 }
 
+/// <summary>Solver and residual diagnostics for the latest candidate, with totals across the fit operation.</summary>
+/// <remarks>Residuals are available when the latest candidate completed sampled forward verification.</remarks>
+public sealed class HeartlineFitDiagnostics
+{
+    internal HeartlineFitDiagnostics() { }
+
+    public FitDiagnostics? Solver { get; internal init; }
+    public int RefinementPasses { get; internal init; }
+    public int VerificationSamples { get; internal init; }
+    public double? MaximumPositionErrorMetres { get; internal init; }
+    public double? MaximumTangentErrorRadians { get; internal init; }
+    public double? MaximumCurvatureErrorPerMetre { get; internal init; }
+    public double? MaximumStationDriftMetres { get; internal init; }
+    public double? LengthErrorMetres { get; internal init; }
+    public Vector3d? MaximumCoordinateAccelerationErrorsMetresPerSecondSquared { get; internal init; }
+    public (double ErrorRadians, double SourceStationMetres, EvaluationSide Side)?
+        WorstBankedFrameError { get; internal init; }
+    public (double SignedErrorRadians, double SourceStationMetres, EvaluationSide Side)?
+        WorstBankRollError { get; internal init; }
+}
+
 public enum HeartlineFailureCode
 {
     InvalidInput,
@@ -39,6 +62,9 @@ public enum HeartlineFailureCode
     EvaluationFailed,
     NumericalRangeExceeded,
     NumericalBudgetExceeded,
+    SplineSolveFailed,
+    SplineRegularityUnresolved,
+    FitToleranceExceeded
 }
 
 /// <summary>A reconstruction or fit failure. Source intervals use local numerical metres.</summary>

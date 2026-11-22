@@ -55,13 +55,16 @@ public sealed class ArcLengthMap
         Nodes = Array.AsReadOnly(parameters.Select((p, i) => new ArcLengthNode(p, stations[i])).ToArray());
     }
 
-    public double StationAt(double parameter)
+    public double StationAt(double parameter) => StationAndErrorAt(parameter).Station;
+
+    internal (double Station, double EstimatedError) StationAndErrorAt(double parameter)
     {
         Check.Argument(parameter, Curve.Minimum, Curve.Maximum, EvaluationSide.Automatic);
         int exact = Array.BinarySearch(parameters, parameter);
-        if (exact >= 0) { return stations[exact]; }
+        if (exact >= 0) { return (stations[exact], errors[exact]); }
         int lower = ~exact - 1;
-        return stations[lower] + IntegrateSpan(parameters[lower], parameter).Value;
+        QuadratureResult partial = IntegrateSpan(parameters[lower], parameter);
+        return (stations[lower] + partial.Value, errors[lower] + partial.EstimatedAbsoluteError);
     }
 
     public ArcLengthInversion Invert(double station, int maximumIterations = 64)

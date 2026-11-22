@@ -84,4 +84,138 @@ public sealed class HeartlineReconstructionFailureTests
         Assert.IsNotNull(ex.Failure.SourceStationInterval);
         Assert.IsTrue(ex.WorkUsed <= limit);
     }
+
+    [TestMethod]
+    [DataRow(1, 20)]
+    [DataRow(1000, 5)]
+    public void FailedFitKeepsItsEvaluableNumericalSourceAndHonorsResourceCaps(int samples, int controls)
+    {
+        var source = Reconstruct([Targets(0, 10, 0)], Distance(0, 10));
+        var fit = HeartlineReconstructor.FitToTrack(source, FitSettings(maxSamples: samples, maxControls: controls));
+        Assert.IsFalse(fit.Succeeded);
+        Assert.IsNull(fit.Track);
+        Assert.AreEqual(HeartlineFailureCode.NumericalBudgetExceeded, fit.Failure!.Code);
+        Assert.AreSame(source, fit.Source);
+        Assert.IsTrue(fit.Diagnostics.VerificationSamples <= samples);
+        TestMath.Near(new(7.3, 0, 0), fit.Source.Evaluate(7.3).UnbankedFrame.Position, 1e-13);
+        Assert.IsTrue(HeartlineReconstructor.FitToTrack(source, FitSettings()).Succeeded);
+    }
+
+    [TestMethod]
+    public void FitRejectsUnmetRegularityMarginAndSpendsNoFvdSamples()
+    {
+        var source = Reconstruct([Targets(0, 10, 0)], Distance(0, 10));
+        var fit = HeartlineReconstructor.FitToTrack(source, FitSettings(regularity: 1.1, maxPasses: 2));
+        Assert.IsFalse(fit.Succeeded);
+        Assert.AreEqual(HeartlineFailureCode.SplineRegularityUnresolved, fit.Failure!.Code);
+        Assert.AreEqual(2, fit.Diagnostics.RefinementPasses);
+        Assert.AreEqual(0, fit.Diagnostics.VerificationSamples);
+    }
+
+    [TestMethod]
+    public void FitPropagatesArcLengthQuadratureExhaustion()
+    {
+        var source = Helix();
+        var fit = HeartlineReconstructor.FitToTrack(source, FitSettings(length: new(1e-25, 0, 1, 15)));
+        Assert.IsFalse(fit.Succeeded);
+        Assert.AreEqual(HeartlineFailureCode.NumericalBudgetExceeded, fit.Failure!.Code);
+        StringAssert.Contains(fit.Failure.Message, "Arc-length integration");
+        StringAssert.Contains(fit.Failure.Message, "15 integrand evaluations");
+        var interval = fit.Failure.SourceStationInterval!.Value;
+        Assert.AreEqual(0, interval.StartMetres);
+        Assert.IsTrue(interval.EndMetres > 0 && interval.EndMetres <= source.LengthMetres);
+        var measurement = fit.Failure.Measurement!.Value;
+        Assert.AreEqual("Arc-length quadrature error estimate", measurement.Quantity);
+        Assert.AreEqual("m", measurement.Unit);
+        Assert.AreEqual(1e-25 * (interval.EndMetres / source.LengthMetres) / 4, measurement.Limit);
+        Assert.IsTrue(double.IsFinite(measurement.Observed) && measurement.Observed > measurement.Limit);
+        Assert.IsNotNull(fit.Diagnostics.Solver);
+        Assert.AreSame(source, fit.Source);
+    }
+
+    [TestMethod]
+    public void FitPropagatesFrameAngularBudgetExhaustion()
+    {
+        var source = Helix();
+        var settings = FitSettings(frameTransportTolerance: 1e-24);
+        var fit = HeartlineReconstructor.FitToTrack(source, settings);
+
+        Assert.IsFalse(fit.Succeeded);
+        Assert.AreEqual(HeartlineFailureCode.NumericalBudgetExceeded, fit.Failure!.Code);
+        StringAssert.Contains(fit.Failure.Message, "Frame transport");
+        StringAssert.Contains(fit.Failure.Message, "subdivision depth 20");
+        var interval = fit.Failure.SourceStationInterval!.Value;
+        Assert.IsTrue(0 <= interval.StartMetres && interval.StartMetres < interval.EndMetres && interval.EndMetres <= source.LengthMetres);
+        var measurement = fit.Failure.Measurement!.Value;
+        Assert.AreEqual("Frame angular error estimate", measurement.Quantity);
+        Assert.AreEqual("rad", measurement.Unit);
+        Assert.AreEqual(settings.FrameTransportToleranceRadians * ((interval.EndMetres - interval.StartMetres) / source.LengthMetres),
+            measurement.Limit);
+        Assert.IsTrue(double.IsFinite(measurement.Observed) && measurement.Observed > measurement.Limit);
+        Assert.AreEqual(0, fit.Diagnostics.VerificationSamples);
+    }
+
+    [TestMethod]
+    public void IncompleteLaterVerificationOnlyReportsItsOwnCandidateDiagnostics()
+    {
+        var source = Helix();
+        const int sampleBudget = 50;
+        var fit = HeartlineReconstructor.FitToTrack(source, FitSettings(maxSamples: sampleBudget));
+        Assert.IsFalse(fit.Succeeded);
+        Assert.AreEqual(HeartlineFailureCode.NumericalBudgetExceeded, fit.Failure!.Code);
+        Assert.AreSame(source, fit.Source);
+        Assert.IsTrue(fit.Diagnostics.RefinementPasses > 1);
+        Assert.IsTrue(fit.Diagnostics.VerificationSamples > 0 && fit.Diagnostics.VerificationSamples <= sampleBudget);
+        Assert.IsNotNull(fit.Diagnostics.Solver);
+        Assert.IsNull(fit.Diagnostics.MaximumPositionErrorMetres);
+        Assert.IsNull(fit.Diagnostics.MaximumCoordinateAccelerationErrorsMetresPerSecondSquared);
+        Assert.IsNull(fit.Diagnostics.WorstBankedFrameError);
+    }
+
+    [TestMethod]
+    [DataRow(false, false)]
+    [DataRow(true, false)]
+    [DataRow(false, true)]
+    [DataRow(true, true)]
+    public void AcceptedJoinMismatchKeepsTheRequestedContinuousKnot(bool bankMismatch, bool withinFitTolerance)
+    {
+        const double join = 5;
+        double bankJump = bankMismatch ? withinFitTolerance ? 1e-7 : 0.001 : 0;
+        ScalarTimeline? bank = bankMismatch ? new ScalarTimeline(ProfileDomain.Distance,
+            [FunctionSegment.Transition(0, join, 0, 0), FunctionSegment.Transition(join, 10, bankJump, bankJump)],
+            allowDiscontinuities: true) : null;
+        double rightTarget = bankMismatch ? 5 : withinFitTolerance ? 5.000001 : 5.005;
+        var source = Reconstruct([Targets(0, join, 5), Targets(join, 10, rightTarget)], Distance(0, 10),
+            bank, settings: Settings(continuity: [0.01], bankJoinTolerance: 0.002));
+
+        var left = source.Evaluate(join, EvaluationSide.Left);
+        var right = source.Evaluate(join, EvaluationSide.Right);
+        Assert.AreEqual(rightTarget, right.LateralCoordinateAccelerationMetresPerSecondSquared);
+        Assert.AreEqual(bankJump, right.BankRadians);
+        Assert.IsNull(source.Evaluate(join).CurvatureVectorPerMetre);
+        double requiredError = (left.CurvatureVectorPerMetre!.Value - right.CurvatureVectorPerMetre!.Value).Length / 2;
+
+        var settings = FitSettings();
+        var fit = HeartlineReconstructor.FitToTrack(source, settings);
+        if (withinFitTolerance)
+        {
+            Assert.IsTrue(fit.Succeeded, fit.Failure?.ToString());
+            Assert.AreEqual(2, fit.Track!.Heartline.Definition.ContinuityAt(join));
+            double station = fit.GetFittedStation(join);
+            Assert.AreEqual(0, fit.Track.Banking.Evaluate(station, EvaluationSide.Left).Value);
+            Assert.AreEqual(bankJump, fit.Track.Banking.Evaluate(station, EvaluationSide.Right).Value);
+            return;
+        }
+
+        Assert.IsFalse(fit.Succeeded);
+        Assert.AreSame(source, fit.Source);
+        Assert.AreEqual(HeartlineFailureCode.FitToleranceExceeded, fit.Failure!.Code);
+        Assert.AreEqual((join, join), fit.Failure.SourceStationInterval);
+        Assert.AreEqual("Minimum sided curvature error", fit.Failure.Measurement!.Value.Quantity);
+        Assert.AreEqual(requiredError, fit.Failure.Measurement.Value.Observed);
+        Assert.IsTrue(requiredError > settings.CurvatureTolerancePerMetre);
+        Assert.AreEqual(0, fit.Diagnostics.RefinementPasses);
+        Assert.AreEqual(0, fit.Diagnostics.VerificationSamples);
+        Assert.IsNull(fit.Diagnostics.Solver);
+    }
 }

@@ -15,4 +15,13 @@ public static class HeartlineReconstructor
         var inputs = new HeartlineReconstructionInputs(request, settings, work);
         return new HeartlineReconstructionIntegrator(inputs, settings, work).Integrate(request.InitialUnbankedPose);
     }
+
+    /// <summary>Fits a degree-five spline of the numerical heartline and forward-verifies it at sampled stations.</summary>
+    public static HeartlineFitResult FitToTrack(ReconstructedHeartline source, HeartlineFitSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(settings);
+        settings.Validate();
+        return new HeartlineSplineConversion(source, settings).Fit();
+    }
 }
