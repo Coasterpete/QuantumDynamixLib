@@ -53,7 +53,7 @@ has no external package or application framework dependencies.
 | `QuantumDynamix.Splines`, `QuantumDynamix.Geometry` | Scalar and spatial B-splines and NURBS with analytic derivatives, constrained fitting, and nondestructive smoothing. Rigid poses, curve curvature, arc-length maps, and rotation-minimizing frames. |
 | `QuantumDynamix.Track` | Banked heartlines, offset spines, and configurable rail arrangements and cross-sections. Rail surface queries, independent spine and rail distance maps, gauge measurements, and geometry diagnostics. Region-based longitudinal acceleration profiles integrate to speed and station for time-authored motion, or to speed and elapsed time for distance-authored motion. Time-authored motion can stop or reverse. Distance-authored motion requires verified positive forward speed. |
 | `QuantumDynamix.Physics` | Newton–Euler rigid-body dynamics with RK4 and spherical or revolute multibody constraints with projected implicit-midpoint integration. Revolute joints allow independent wheel spin and report bearing reactions. Wheel/rail contact provides signed-gap geometry on declared smooth patches, first-order rigid normal impulses, and a separate compliant normal-contact solver using caller-supplied power-law coefficients. |
-| `QuantumDynamix.FVD` | Forward force-vector design (FVD) evaluation for an ideal point with prescribed heartline motion. It calculates world coordinate acceleration and specific force in the banked track frame, using caller-supplied gravity. |
+| `QuantumDynamix.FVD` | Forward force-vector design (FVD) evaluation for an ideal point with prescribed heartline motion. It calculates world coordinate acceleration and specific force in the banked track frame, using caller-supplied gravity. Numerical 3D heartline reconstruction uses prescribed longitudinal motion, transverse coordinate acceleration, and banking. Quintic track spline fitting includes sampled forward verification. |
 | `QuantumDynamix.Supports` | Straight support-member geometry between a named rail-section datum and a supplied foundation point. |
 | `QuantumDynamix.Operations` | Block occupancy for one supplied train extent on an open or closed route, with an unknown state for missing or invalid localization. |
 | `QuantumDynamix.Telemetry` | Per-body center-of-mass position, speed, and instantaneous linear acceleration sampled at accepted constrained-step endpoints. |
@@ -65,22 +65,21 @@ support analysis, rendering, and UI are outside the current library scope.
 
 ## M3.x development status
 
-The reconstruction development tree contains regression-tested work that is
-still pending integration into `main`.
+The table reflects `main` at commit `da1a5ae`.
 
-| Milestone | Verified in development |
-| --- | --- |
-| M3 | Reconstructs a numerical 3D heartline from prescribed longitudinal motion, transverse acceleration, and banking profiles. Regression cases include straights, circular arcs, a helix, and time- and distance-authored inputs. |
-| M3.1 | Fits the numerical heartline to a quintic spline for `HeartlineTrack`. Independent samples check geometry, banking, and acceleration through the forward FVD evaluator. |
-| M3.2 | Stabilizes frame transport when authored knots and generated sample parameters collide at floating-point resolution. Adds regression coverage and preserves numerical context for fit, arc-length, and frame-transport failures. |
-| M3.3 Phase 1 | Reduces allocations in adaptive quadrature and spline-basis evaluation. |
+| Milestone | Status on `main` | Functionality |
+| --- | --- | --- |
+| M3 | Integrated | Reconstructs a numerical 3D heartline from prescribed longitudinal motion, transverse acceleration, and banking profiles. Regression cases include straights, circular arcs, a helix, and time- and distance-authored inputs. |
+| M3.1 | Integrated | Fits the numerical heartline to a quintic spline for `HeartlineTrack`. Independent samples check geometry, banking, and acceleration through the forward FVD evaluator. |
+| M3.2 | Integrated | Stabilizes frame transport when authored knots and generated sample parameters collide at floating-point resolution. Adds regression coverage and preserves numerical context for fit, arc-length, and frame-transport failures. |
+| M3.3 Phase 1 | Integrated | Reduces allocations in adaptive quadrature and spline-basis evaluation. |
+| M3.3 Phase 2, Step 1 | Integrated | Replaces a capturing segment-search predicate in `ScalarTimeline.Evaluate` with an indexed scan. |
+| M3.3 Phase 2, Step 2 | Pending | |
 
 ### M3.3 Phase 2, Step 1
 
-The change on `main` replaces a capturing segment-search predicate in
-`ScalarTimeline.Evaluate` with an indexed scan. Regression tests exercise exact
-joins, adjacent floating-point coordinates, sided evaluation, and boundary
-policies. [Step 1 change and benchmark record](https://github.com/Coasterpete/QuantumDynamixLib/pull/1)
+Regression tests exercise exact joins, adjacent floating-point coordinates,
+sided evaluation, and boundary policies. [Step 1 change and benchmark record](https://github.com/Coasterpete/QuantumDynamixLib/pull/1)
 
 An isolated Release probe measured **88 → 0 bytes per segment lookup**.
 In the **600 m distance-authored reconstruction** benchmark on the development
