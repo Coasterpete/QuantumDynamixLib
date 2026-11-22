@@ -102,47 +102,55 @@ internal sealed class HeartlineMotionMap
     }
 
     internal MappedMotion AtStation(double station, double? pinnedCoordinate, double? pinnedAuthoredTime, EvaluationSide side,
-        ReconstructionWork work)
+        ReconstructionWork work, in MotionQuery? previous, out MotionQuery sampled)
     {
+        double authored;
         if (pinnedCoordinate is double exact)
         {
-            LongitudinalMotionSample motion = Sample(exact, side, work);
-            double residual = System.Math.Abs((motion.HeartlineStationMetres - OriginStation) - station);
-            return CheckErrors(residual, motion, station, exact, work, pinnedAuthoredTime);
+            authored = exact;
         }
-        if (Domain == ProfileDomain.Time) { return Invert(station, side, work); }
-        double authored = OriginStation + station;
-        if (!double.IsFinite(authored) || authored < First.Native || authored > Last.Native)
-        { throw MappingFailure(work, station, "Local station cannot be resolved on the authored station axis."); }
-        int index = Array.BinarySearch(stationAxis, station);
-        if (index < 0)
+        else
         {
-            int upper = ~index;
-            double left = nodes[upper - 1].Native;
-            double right = nodes[upper].Native;
-            if (authored <= left) { authored = left; side = EvaluationSide.Right; }
-            if (authored >= right) { authored = right; side = EvaluationSide.Left; }
+            if (Domain == ProfileDomain.Time) { return Invert(station, side, work, in previous, out sampled); }
+            authored = OriginStation + station;
+            if (!double.IsFinite(authored) || authored < First.Native || authored > Last.Native)
+            { throw MappingFailure(work, station, "Local station cannot be resolved on the authored station axis."); }
+            int index = Array.BinarySearch(stationAxis, station);
+            if (index < 0)
+            {
+                int upper = ~index;
+                double left = nodes[upper - 1].Native;
+                double right = nodes[upper].Native;
+                if (authored <= left) { authored = left; side = EvaluationSide.Right; }
+                if (authored >= right) { authored = right; side = EvaluationSide.Left; }
+            }
         }
-        return CheckErrors(System.Math.Abs((authored - OriginStation) - station),
-            Sample(authored, side, work), station, authored, work);
+        LongitudinalMotionSample motion = Sample(authored, side, work, in previous);
+        double residual = System.Math.Abs((motion.HeartlineStationMetres - OriginStation) - station);
+        MappedMotion mapped = CheckErrors(residual, motion, station, authored, work, pinnedAuthoredTime);
+        sampled = new(authored, side, motion);
+        return mapped;
     }
 
     internal MappedMotion AtTime(double time, EvaluationSide side, ReconstructionWork work)
     {
-        if (Domain == ProfileDomain.Distance) { return Invert(time, side, work); }
+        if (Domain == ProfileDomain.Distance) { return Invert(time, side, work, null, out _); }
         LongitudinalMotionSample motion = Sample(time, side, work);
         return CheckErrors(0, motion, motion.HeartlineStationMetres - OriginStation, time, work);
     }
 
-    private MappedMotion Invert(double target, EvaluationSide side, ReconstructionWork work)
+    private MappedMotion Invert(double target, EvaluationSide side, ReconstructionWork work,
+        in MotionQuery? previous, out MotionQuery sampled)
     {
         bool byStation = Domain == ProfileDomain.Time;
         int index = Array.BinarySearch(inverseAxis, target);
         if (index >= 0)
         {
             MotionNode node = nodes[index];
-            return CheckErrors(0, Sample(node.Native, side, work), node.Station, node.Native, work,
-                byStation ? null : target);
+            LongitudinalMotionSample motion = Sample(node.Native, side, work, in previous);
+            MappedMotion mapped = CheckErrors(0, motion, node.Station, node.Native, work, byStation ? null : target);
+            sampled = new(node.Native, side, motion);
+            return mapped;
         }
         int upper = ~index;
         if (upper == 0 || upper == nodes.Length)
@@ -155,7 +163,7 @@ internal sealed class HeartlineMotionMap
         while (true)
         {
             EvaluationSide limit = x == low ? EvaluationSide.Right : x == high ? EvaluationSide.Left : side;
-            LongitudinalMotionSample motion = Sample(x, limit, work);
+            LongitudinalMotionSample motion = Sample(x, limit, work, in previous);
             double station = motion.HeartlineStationMetres - OriginStation;
             double residual = (byStation ? station : OriginTime + motion.ElapsedSeconds) - target;
             double speed = motion.HeartlineVelocityMetresPerSecond;
@@ -167,7 +175,9 @@ internal sealed class HeartlineMotionMap
             if (stationError <= settings.StationMappingToleranceMetres && timeError <= settings.TimeMappingToleranceSeconds)
             {
                 RecordErrors(stationError, timeError, byStation ? target : station, work);
-                return WithErrors(x, byStation ? x : target, motion, stationError, timeError, station, work);
+                MappedMotion mapped = WithErrors(x, byStation ? x : target, motion, stationError, timeError, station, work);
+                sampled = new(x, limit, motion);
+                return mapped;
             }
             if (System.Math.Abs(residual) <= nativeError)
             { throw MappingFailure(work, station, "The M2 error estimate prevents resolving the inverse within tolerance."); }
@@ -229,12 +239,16 @@ internal sealed class HeartlineMotionMap
         work.TimeError = System.Math.Max(work.TimeError, timeError);
     }
 
-    private LongitudinalMotionSample Sample(double coordinate, EvaluationSide side, ReconstructionWork work)
+    private LongitudinalMotionSample Sample(double coordinate, EvaluationSide side, ReconstructionWork work,
+        in MotionQuery? previous = null)
     {
         work.Charge();
         try
         {
-            LongitudinalMotionSample sample = trajectory.Sample(coordinate, side);
+            // A retry still costs one M3 sample and runs the same enclosure and mapping checks.
+            LongitudinalMotionSample sample = previous is MotionQuery query && query.Side == side
+                && BitConverter.DoubleToInt64Bits(query.Coordinate) == BitConverter.DoubleToInt64Bits(coordinate)
+                ? query.Motion : trajectory.Sample(coordinate, side);
             if (timeProof is not null)
             {
                 int index = Array.BinarySearch(timeProofEnds!, coordinate);
@@ -282,6 +296,7 @@ internal sealed class HeartlineMotionMap
             measurement: measurement);
 
     internal readonly record struct MotionNode(double Station, double Native, double Time, LongitudinalMotionSample Motion);
+    internal readonly record struct MotionQuery(double Coordinate, EvaluationSide Side, LongitudinalMotionSample Motion);
     internal readonly record struct MappedMotion(double Native, double Time, LongitudinalMotionSample Motion,
         double StationError, double TimeError, double VelocityError);
 }

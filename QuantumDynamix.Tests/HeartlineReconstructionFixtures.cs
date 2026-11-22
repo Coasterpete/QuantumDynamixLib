@@ -79,7 +79,7 @@ internal static class HeartlineReconstructionFixtures
     internal static LongitudinalTrajectory Time(ScalarTimeline acceleration, double station, double velocity) =>
         MotionProfile(acceleration).IntegrateTime(new(station, velocity), new(1e-9, 1e-9, 32, 50_000));
 
-    private static LongitudinalAccelerationProfile MotionProfile(ScalarTimeline acceleration)
+    internal static LongitudinalAccelerationProfile MotionProfile(ScalarTimeline acceleration)
     {
         var region = new Region(acceleration.Domain, acceleration.Minimum, acceleration.Maximum,
             new Dictionary<string, ScalarTimeline> { ["longitudinal"] = acceleration });

@@ -25,6 +25,7 @@ internal sealed class HeartlineReconstructionIntegrator(HeartlineReconstructionI
         double rotationRoundoff = 16 * (System.Math.BitIncrement(1.0) - 1);
         double station = 0;
         double step = settings.MaximumStepMetres;
+        HeartlineMotionMap.MotionQuery? retryStartMotion = null;
 
         foreach (double boundary in inputs.Boundaries.AsSpan(1))
         {
@@ -55,7 +56,7 @@ internal sealed class HeartlineReconstructionIntegrator(HeartlineReconstructionI
                 double localRoll = double.PositiveInfinity;
                 try
                 {
-                    Vector3d a = Omega(station, EvaluationSide.Right);
+                    Vector3d a = inputs.Target(station, EvaluationSide.Right, work, ref retryStartMotion).AngularVelocity;
                     Vector3d b = Omega(quarter);
                     Vector3d c = Omega(mid);
                     Vector3d d = Omega(thirdQuarter);
@@ -113,6 +114,7 @@ internal sealed class HeartlineReconstructionIntegrator(HeartlineReconstructionI
                                     offset = endOffset;
                                     rotation = second.EndRotation;
                                     station = end;
+                                    retryStartMotion = null;
                                     step = System.Math.Min(settings.MaximumStepMetres, System.Math.Max(step, 2 * width));
                                     continue;
                                 }

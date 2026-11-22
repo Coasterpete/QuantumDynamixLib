@@ -121,9 +121,16 @@ internal sealed class HeartlineReconstructionInputs
 
     internal ReconstructionTarget Target(double station, EvaluationSide side, ReconstructionWork work)
     {
+        HeartlineMotionMap.MotionQuery? retryStartMotion = null;
+        return Target(station, side, work, ref retryStartMotion);
+    }
+
+    internal ReconstructionTarget Target(double station, EvaluationSide side, ReconstructionWork work,
+        ref HeartlineMotionMap.MotionQuery? retryStartMotion)
+    {
         bool pinned = motionPins.TryGetValue(station, out var pin);
         HeartlineMotionMap.MappedMotion mapped = Motion.AtStation(station, pinned ? pin.Native : null,
-            pin.AuthoredTime, side, work);
+            pin.AuthoredTime, side, work, in retryStartMotion, out HeartlineMotionMap.MotionQuery sampled);
         double space = Motion.OriginStation + station;
         var (coordinate, transverseSide) = transverse.Resolve(station,
             TransverseDomain == ProfileDomain.Time ? mapped.Time : space, side);
@@ -150,6 +157,7 @@ internal sealed class HeartlineReconstructionInputs
         try
         {
             var omega = new Vector3d(0, -sine * kl - cosine * ku, cosine * kl - sine * ku);
+            retryStartMotion = sampled;
             return new(coordinate, mapped.Motion, stationError, timeError, mapped.VelocityError, bank, left, up, omega);
         }
         catch (ArgumentOutOfRangeException ex)

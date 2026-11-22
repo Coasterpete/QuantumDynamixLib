@@ -215,6 +215,64 @@ public sealed class HeartlineReconstructionTests
     }
 
     [TestMethod]
+    [DataRow(ProfileDomain.Distance, ProfileDomain.Distance)]
+    [DataRow(ProfileDomain.Distance, ProfileDomain.Time)]
+    [DataRow(ProfileDomain.Time, ProfileDomain.Distance)]
+    [DataRow(ProfileDomain.Time, ProfileDomain.Time)]
+    public void RejectedTrialsAtRegionJoinsReuseMotionAndReevaluateSidedTargets(
+        ProfileDomain motionDomain, ProfileDomain targetDomain)
+    {
+        const double speed = 8;
+        const double clock = 4;
+        const double joinStation = 1;
+        const double length = 3;
+        int motionCalls = 0;
+        int? firstTrialEnd = null;
+        int? firstRetryStart = null;
+        bool timeMotion = motionDomain == ProfileDomain.Time;
+        bool timeTargets = targetDomain == ProfileDomain.Time;
+        double start = timeTargets ? clock : 0;
+        double join = timeTargets ? clock + joinStation / speed : joinStation;
+        double end = timeTargets ? clock + length / speed : length;
+        var acceleration = Function(motionDomain, timeMotion ? clock : 0, timeMotion ? clock + length / speed : length, _ =>
+        {
+            motionCalls++;
+            return new(0);
+        });
+        var motion = timeMotion ? Time(acceleration, 0, speed) : MotionProfile(acceleration)
+            .IntegrateDistance(speed, new(1e-9, 1e-9, 32, 100_000), (_, _, _) => new(0, 0));
+        Region[] regions = [
+            Targets(Constant(targetDomain, start, join, 0), Constant(targetDomain, start, join, 0)),
+            Targets(new ScalarTimeline(targetDomain, [new CustomFunction(join, end, (coordinate, side) =>
+            {
+                if (coordinate == end && side == EvaluationSide.Left) { firstTrialEnd ??= motionCalls; }
+                if (coordinate == join && side == EvaluationSide.Right && firstTrialEnd.HasValue)
+                { firstRetryStart ??= motionCalls; }
+                return new(2 * speed * speed);
+            })]), Constant(targetDomain, join, end, 0))
+        ];
+
+        // The first outgoing trial spans two metres at a curvature of 2/m, so the rate guard rejects it.
+        var source = Reconstruct(regions, motion, settings: Settings(maximumStep: length, steps: [join]), clock: clock,
+            bounds: (_, _, _) => new(0, 0));
+
+        Assert.IsNotNull(firstTrialEnd);
+        Assert.IsNotNull(firstRetryStart);
+        Assert.AreEqual(firstTrialEnd, firstRetryStart, "The retry should evaluate the target with no new M2 query.");
+        CollectionAssert.AreEqual(new[] { 0.0, joinStation, length }, source.BoundaryStationsMetres.ToArray());
+        int callsBeforeQuery = motionCalls;
+        var incoming = source.Evaluate(joinStation, EvaluationSide.Left);
+        var outgoing = source.Evaluate(joinStation, EvaluationSide.Right);
+        Assert.IsGreaterThan(callsBeforeQuery, motionCalls);
+        Assert.AreEqual(join, incoming.AuthoredCoordinate);
+        Assert.AreEqual(join, outgoing.AuthoredCoordinate);
+        Assert.AreEqual(joinStation / speed, outgoing.Motion.ElapsedSeconds);
+        Assert.AreEqual(incoming.UnbankedFrame, outgoing.UnbankedFrame);
+        TestMath.Near(Vector3d.Zero, incoming.CurvatureVectorPerMetre!.Value, 0);
+        TestMath.Near(2 * Vector3d.UnitY, outgoing.CurvatureVectorPerMetre!.Value, 1e-12);
+    }
+
+    [TestMethod]
     [DataRow(ProfileDomain.Time, false)]
     [DataRow(ProfileDomain.Time, true)]
     [DataRow(ProfileDomain.Distance, false)]

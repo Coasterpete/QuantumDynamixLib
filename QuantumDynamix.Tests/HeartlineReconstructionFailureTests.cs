@@ -86,6 +86,46 @@ public sealed class HeartlineReconstructionFailureTests
     }
 
     [TestMethod]
+    public void RetryingWithNoM3WorkForTheStartSampleFailsBeforeItsTarget()
+    {
+        // Setup costs three units and the first trial costs 16 before rejection by the rate guard.
+        // The retry spends the last unit on the trial itself, leaving none for its start sample.
+        const int limit = 20;
+        var failure = Assert.ThrowsExactly<HeartlineReconstructionException>(() =>
+            Reconstruct([Targets(0, 4, 200)], Distance(0, 4), settings: Settings(work: limit, maximumStep: 4)));
+
+        Assert.AreEqual(HeartlineFailureCode.NumericalBudgetExceeded, failure.Failure.Code);
+        Assert.AreEqual(limit, failure.WorkUsed);
+        Assert.AreEqual("The reconstruction work limit was exhausted.", failure.Failure.Message);
+        Assert.IsNull(failure.Failure.SourceStationInterval);
+        Assert.IsNull(failure.Failure.Measurement);
+    }
+
+    [TestMethod]
+    public void ExhaustedM2QueryRetainsItsDiagnosticsOnEachReconstruction()
+    {
+        // Two 15-node rules can build the time prefix. An interior query also charges its acceleration evaluation.
+        var motion = MotionProfile(Constant(ProfileDomain.Time, 0, 1, 0))
+            .IntegrateTime(new(0, 8), new(1e-9, 1e-9, 32, 30));
+        Region[] regions = [Targets(0, 8, 0)];
+        var queryFailure = Assert.ThrowsExactly<TrajectoryException>(() => motion.Sample(0.03125, EvaluationSide.Right));
+        Assert.AreEqual(TrajectoryFailureCode.NumericalBudgetExceeded, queryFailure.Code);
+        Assert.AreEqual(16, queryFailure.WorkUsed);
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            var failure = Assert.ThrowsExactly<HeartlineReconstructionException>(() => Reconstruct(regions, motion));
+            Assert.AreEqual(HeartlineFailureCode.SourceTrajectoryFailed, failure.Failure.Code);
+            Assert.AreEqual((ProfileDomain.Time, 0.0, 0.03125), failure.Failure.AuthoredInterval);
+            Assert.AreEqual(0, failure.Failure.RegionIndex);
+            var inner = Assert.IsInstanceOfType<TrajectoryException>(failure.InnerException);
+            Assert.AreEqual(queryFailure.Code, inner.Code);
+            Assert.AreEqual(queryFailure.Message, inner.Message);
+            Assert.AreEqual(queryFailure.WorkUsed, inner.WorkUsed);
+        }
+    }
+
+    [TestMethod]
     [DataRow(1, 20)]
     [DataRow(1000, 5)]
     public void FailedFitKeepsItsEvaluableNumericalSourceAndHonorsResourceCaps(int samples, int controls)
