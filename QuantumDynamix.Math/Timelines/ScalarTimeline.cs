@@ -148,7 +148,11 @@ public sealed class ScalarTimeline : IScalarFunction
             ScalarJet right = atStart ? inside : outside;
             return Choose(left, right, side);
         }
-        int index = Array.FindIndex(segments, s => argument < s.Maximum);
+        int index = 0;
+        for (; index < segments.Length; index++)
+        {
+            if (argument < segments[index].Maximum) { break; }
+        }
         if (index > 0 && argument == segments[index].Minimum)
         {
             return Choose(segments[index - 1].Evaluate(argument, EvaluationSide.Left), segments[index].Evaluate(argument, EvaluationSide.Right), side);
