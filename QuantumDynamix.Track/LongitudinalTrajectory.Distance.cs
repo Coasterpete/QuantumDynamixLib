@@ -144,7 +144,7 @@ public sealed partial class LongitudinalTrajectory
                 {
                     QuadratureResult change = work.Integrate(panel, coordinate, squaredSpeedTolerance, station =>
                     {
-                        double acceleration = work.EvaluateCharged(station, panel.RegionIndex, () => panel.Evaluate(station)).Value;
+                        double acceleration = work.EvaluateCharged(station, in panel).Value;
                         if (forward.ProvidedRange is AccelerationRange range)
                         { ForwardSpeedValidation.CheckObserved(work, panel, range, station, acceleration); }
                         return 2 * acceleration;

@@ -313,6 +313,67 @@ public sealed class LongitudinalTrajectoryTests
     }
 
     [TestMethod]
+    public void NestedDistanceQuadraturePreservesTheAuthoredException()
+    {
+        // The first elapsed-time node is 0.5. Its squared-speed integral first evaluates at 0.25.
+        var callbackError = new ArithmeticException("acceleration unavailable at the nested node");
+        var profile = CustomDistance(new CustomFunction(0, 1, (s, _) =>
+            s == 0.25 ? throw callbackError : new(0)));
+
+        var failure = Assert.ThrowsExactly<TrajectoryException>(() =>
+            profile.IntegrateDistance(2, DistanceSettings, (_, _, _) => new(0, 0)));
+
+        Assert.AreEqual(TrajectoryFailureCode.EvaluationFailed, failure.Code);
+        Assert.AreEqual(ProfileDomain.Distance, failure.Domain);
+        Assert.AreEqual(0, failure.RegionIndex);
+        Assert.AreEqual(0.25, failure.StartCoordinate);
+        Assert.AreEqual(0.25, failure.EndCoordinate);
+        Assert.AreEqual(20, failure.WorkUsed); // Three proof charges, 15 endpoint nodes, and one node in each nested rule.
+        Assert.AreSame(callbackError, failure.InnerException);
+    }
+
+    [TestMethod]
+    public void NestedDistanceQuadratureRejectsAnObservationOutsideTheSuppliedRange()
+    {
+        var profile = CustomDistance(new CustomFunction(0, 1, (s, _) => new(s == 0.25 ? 1 : 0)));
+
+        var failure = Assert.ThrowsExactly<TrajectoryException>(() =>
+            profile.IntegrateDistance(2, DistanceSettings, (_, _, _) => new(0, 0)));
+
+        Assert.AreEqual(TrajectoryFailureCode.InvalidAccelerationBounds, failure.Code);
+        Assert.AreEqual(ProfileDomain.Distance, failure.Domain);
+        Assert.AreEqual(0, failure.RegionIndex);
+        Assert.AreEqual(0.25, failure.StartCoordinate);
+        Assert.AreEqual(0.25, failure.EndCoordinate);
+        Assert.AreEqual(20, failure.WorkUsed);
+        Assert.IsNull(failure.InnerException);
+    }
+
+    [TestMethod]
+    public void NestedDistanceQuadratureRequiresEnoughWorkForTheNextRule()
+    {
+        int interiorEvaluations = 0;
+        var profile = CustomDistance(new CustomFunction(0, 1, (s, _) =>
+        {
+            if (s > 0 && s < 1) { interiorEvaluations++; }
+            return new(0);
+        }));
+        var settings = new DistanceTrajectorySettings(Tolerance, Tolerance, 20, 33);
+
+        var failure = Assert.ThrowsExactly<TrajectoryException>(() =>
+            profile.IntegrateDistance(2, settings, (_, _, _) => new(0, 0)));
+
+        Assert.AreEqual(TrajectoryFailureCode.NumericalBudgetExceeded, failure.Code);
+        Assert.AreEqual(ProfileDomain.Distance, failure.Domain);
+        Assert.AreEqual(0, failure.RegionIndex);
+        Assert.AreEqual(0.0, failure.StartCoordinate);
+        Assert.AreEqual(0.5, failure.EndCoordinate);
+        Assert.AreEqual(19, failure.WorkUsed); // The first outer node leaves 14 charges for the 15-node inner rule.
+        Assert.AreEqual(15, interiorEvaluations);
+        Assert.IsNull(failure.InnerException);
+    }
+
+    [TestMethod]
     public void DistanceQueriesCheckDirectlyObservedAccelerationAgainstTheProviderRange()
     {
         // One deliberately false range, contradicted at a specific coordinate outside the construction nodes.
