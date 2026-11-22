@@ -204,13 +204,75 @@ public sealed class EasingTimelineTests
     }
 
     [TestMethod]
+    public void TimelineSelectsSegmentsAtInteriorsAndAtAdjacentFloatingPointCoordinates()
+    {
+        var cubic = new EasingFunction(EasingKind.Cubic);
+        FunctionSegment[] segments = [
+            FunctionSegment.Transition(0, 2, 0, 8, cubic),
+            FunctionSegment.Transition(2, 4, 8, 24, cubic),
+            FunctionSegment.Transition(4, 8, 24, 0, cubic)];
+        var timeline = new ScalarTimeline(ProfileDomain.Distance, segments);
+
+        Assert.AreEqual(segments[0].Evaluate(1), timeline.Evaluate(1));
+        Assert.AreEqual(segments[1].Evaluate(3), timeline.Evaluate(3));
+        Assert.AreEqual(segments[2].Evaluate(6), timeline.Evaluate(6));
+
+        for (int i = 1; i < segments.Length; i++)
+        {
+            double join = segments[i].Minimum;
+            double before = System.Math.BitDecrement(join);
+            double after = System.Math.BitIncrement(join);
+            foreach (EvaluationSide side in Enum.GetValues<EvaluationSide>())
+            {
+                Assert.AreEqual(segments[i - 1].Evaluate(before, side), timeline.Evaluate(before, side));
+                Assert.AreEqual(segments[i].Evaluate(after, side), timeline.Evaluate(after, side));
+            }
+
+            Assert.AreEqual(segments[i - 1].Evaluate(join, EvaluationSide.Left), timeline.Evaluate(join, EvaluationSide.Left));
+            Assert.AreEqual(segments[i].Evaluate(join, EvaluationSide.Right), timeline.Evaluate(join, EvaluationSide.Right));
+            ScalarJet automatic = timeline.Evaluate(join, EvaluationSide.Automatic);
+            Assert.AreEqual(segments[i].Evaluate(join, EvaluationSide.Right).Value, automatic.Value);
+            Assert.AreEqual(0, automatic.DerivativeOrder);
+        }
+    }
+
+    [TestMethod]
+    public void RejectUsesInwardLimitsAtBothEndpointsForEveryEvaluationSide()
+    {
+        var segment = new CustomFunction(1, 3, static (x, side) =>
+        {
+            bool limitUnavailable = (x == 1 && side != EvaluationSide.Right) || (x == 3 && side != EvaluationSide.Left);
+            return limitUnavailable ? new(x, derivativeOrder: 0) : new(x, 1);
+        });
+        var timeline = new ScalarTimeline(ProfileDomain.Time, [segment]);
+
+        foreach (EvaluationSide side in Enum.GetValues<EvaluationSide>())
+        {
+            Assert.AreEqual(new ScalarJet(1, 1), timeline.Evaluate(1, side));
+            Assert.AreEqual(new ScalarJet(3, 1), timeline.Evaluate(3, side));
+        }
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => timeline.Evaluate(System.Math.BitDecrement(1)));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => timeline.Evaluate(System.Math.BitIncrement(3)));
+    }
+
+    [TestMethod]
     public void HoldZeroRejectAndRepeatHaveExplicitBoundaryDerivativeSemantics()
     {
         var hold = ScalarTimeline.FromKeyframes(ProfileDomain.Time, new[] { new TimelineKeyframe(0, 2), new TimelineKeyframe(1, 4) }, BoundaryPolicy.Hold);
-        Assert.AreEqual(2, hold.Evaluate(-1).Value);
+        Assert.AreEqual(new ScalarJet(2), hold.Evaluate(-1));
+        Assert.AreEqual(new ScalarJet(4), hold.Evaluate(2));
         Assert.AreEqual(0, hold.Evaluate(0).DerivativeOrder);
+        Assert.AreEqual(new ScalarJet(2, 2), hold.Evaluate(0, EvaluationSide.Right));
+        Assert.AreEqual(new ScalarJet(4, 2), hold.Evaluate(1, EvaluationSide.Left));
         Assert.ThrowsExactly<ArgumentException>(() => new ScalarTimeline(ProfileDomain.Time, hold.Segments, BoundaryPolicy.Zero));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new ScalarTimeline(ProfileDomain.Time, hold.Segments).Evaluate(-1));
+        var zero = new ScalarTimeline(ProfileDomain.Time, hold.Segments, BoundaryPolicy.Zero, allowDiscontinuities: true);
+        Assert.AreEqual(new ScalarJet(0), zero.Evaluate(-1));
+        Assert.AreEqual(new ScalarJet(0), zero.Evaluate(2));
+        Assert.AreEqual(new ScalarJet(0), zero.Evaluate(0, EvaluationSide.Left));
+        Assert.AreEqual(new ScalarJet(0), zero.Evaluate(1, EvaluationSide.Right));
+        Assert.AreEqual(new ScalarJet(2, 2), zero.Evaluate(0, EvaluationSide.Right));
+        Assert.AreEqual(new ScalarJet(4, 2), zero.Evaluate(1, EvaluationSide.Left));
         var repeat = ScalarTimeline.FromKeyframes(ProfileDomain.Distance, new[] { new TimelineKeyframe(0, 0), new TimelineKeyframe(1, 1), new TimelineKeyframe(2, 0) }, BoundaryPolicy.Repeat);
         Assert.AreEqual(0.25, repeat.Evaluate(-0.25).Value, 1e-15);
         Assert.AreEqual(0.25, repeat.Evaluate(2.25).Value, 1e-15);
