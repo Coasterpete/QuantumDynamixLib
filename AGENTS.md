@@ -141,3 +141,10 @@ For errors or typos, point to the relevant line, error, or operation; explain th
 Determine whether the request is for explanation/review, a design proposal, or an actual file change. For a lesson or review, explain the mathematics and C# syntax without editing the repository. For requested engineering development, inspect the repository and obtain approval for new APIs and methods before implementation. Once implementation is authorized, write the production code and appropriate tests within that scope, explain the work, and verify it honestly.
 
 The goal is meaningful progress on QUANTUM DYNAMIX while helping the owner **understand, write, debug, and maintain their own engineering software**.
+
+## 10. GitHub pull requests and milestone merges
+
+- For an owner-authorized implementation milestone, this section grants standing permission to push its feature branch, open or update its pull request, and merge it into `main` after verification. Follow any task-specific instruction to keep work local, stop for review, or defer the merge.
+- Confirm that the pull request contains only the authorized changes and preserve unrelated working-tree work. Run the required tests against the exact pull request head and record the results. If the head changes, verify the new revision before merging.
+- After local verification passes, use GitHub auto-merge when available so GitHub can wait for required checks and reviews. Otherwise, wait for the pull request to meet the repository's merge requirements and merge it without a second approval from the owner. Leave the pull request open while checks or reviews are unresolved, or if verification fails, conflicts remain, or the merge would exceed the authorized scope.
+- Merge only through the pull request and honor branch protections. Verify the result and report the pull request link, merge commit SHA, and test results.
