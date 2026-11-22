@@ -109,8 +109,8 @@ public static class AdaptiveGaussKronrod
             double k = Kronrod[7] * centerValue;
             double g = Gauss[3] * centerValue;
             double absolute = Kronrod[7] * System.Math.Abs(centerValue);
-            double[] lows = new double[7];
-            double[] highs = new double[7];
+            Span<double> lows = stackalloc double[7];
+            Span<double> highs = stackalloc double[7];
             for (int j = 0; j < 7; j++)
             {
                 lows[j] = Value(center - half * Nodes[j]);
