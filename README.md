@@ -1,102 +1,109 @@
 # QuantumDynamixLib
-Official C# mathematics, geometry, and physics simulation library for QUANTUM DYNAMIX.
+
+**QuantumDynamixLib** is the official C#/.NET mathematics, geometry, and physics
+library supporting **QUANTUM DYNAMIX**, a human-directed roller coaster engineering
+and simulation application.
 
 Licensed under the [MIT License](LICENSE).
 
-## Current capabilities
-
-Implemented in the current library:
-
-- **Double-precision mathematics:** vectors, 3x3 matrices, Hamilton quaternions,
-  and rigid poses in right-handed coordinates.
-- **Splines and heartline geometry:** scalar and spatial B-splines/NURBS,
-  analytic derivatives, curvature, arc-length mapping, rotation-minimizing frames,
-  banking, and derived track-spine offsets.
-- **Profiles and fitting:** easing functions, time/distance timelines,
-  feature-relative anchors, constrained fitting, and nondestructive smoothing.
-- **Physical rail geometry:** custom rail arrangements and cross-sections,
-  section roll, surface queries, explicit spacing/gauge measurements, independent
-  spine/rail distance maps, and geometric diagnostics.
-- **Dynamics foundations:** unconstrained Newton-Euler rigid-body dynamics with
-  RK4 integration, plus spherical/revolute multibody dynamics and projected
-  implicit-midpoint integration.
-- **Revolute joints and independent wheel spin:** body-local attachment frames,
-  one free relative rotation, explicit wheel-body mass and full inertia, wrapped
-  angle/rate queries, bearing forces/couples, and physical gyroscopic coupling.
-- **Wheel/rail contact geometry:** owner-defined crowned treads, declared smooth
-  stationary rail patches and material sides, bounded signed-gap searches,
-  surface normals, contact witnesses, and relative material-point velocities.
-- **Rigid normal contact:** frictionless unilateral normal impulses coupled to
-  spherical and revolute joints, inelastic discrete impacts, separation,
-  step-average loads, and separate first-order stepping for determinate contact reactions.
-- **Compliant normal contact:** explicit owner-supplied power-law coefficients,
-  compression-only non-attractive damping, deformation-dependent wheel-load
-  sharing, instantaneous forces and elastic energy, and a separate integration
-  path using the existing projected implicit-midpoint joint solver.
-
-Future application functionality, including FVD reconstruction, complete coaster
-simulation, friction, traction, braking mechanisms, suspension, automatic no-slip rolling,
-derailment modeling, train animation, rendering, and UI, is not implemented here.
-Rail geometry queries do not advance vehicles or apply contact forces. Contact stepping does not prescribe
-a spline-following trajectory.
-
-The owner-approved spline, easing, timeline, heartline, and constrained smoothing
-foundation is documented in [Spline and timeline mathematics](docs/SplineTimelineFoundation.md),
-including C# examples, numerical conventions, diagnostics, and implementation limits.
-
-The owner-approved [physical rail geometry foundation](docs/PhysicalRailGeometryFoundation.md)
-adds configurable rail arrangements and cross-sections, analytic offset geometry,
-independent spine/rail distances, explicit spacing/gauge measurements, and continuity
-diagnostics. Physical motion remains the responsibility of the existing dynamics solvers.
-
-The owner-approved [wheel/rail contact foundation](docs/WheelRailContactFoundation.md)
-documents local signed-gap geometry, the coupled impulse method, numerical controls,
-an executable-style C# example, and initial limitations. Impulses, step-average loads,
-and numerical corrections have distinct output semantics; precise impact timing and
-unique individual loads in redundant rigid assemblies are not supplied.
-
-The optional [compliant normal-contact foundation](docs/CompliantWheelRailContactFoundation.md)
-documents the force law, physical parameter limits, energy diagnostics, and
-analytical load-sharing regressions. Physical compression is retained; numerical
-joint corrections are reported separately. Real-wheel coefficients and impact
-accuracy require physical evidence beyond these synthetic regression cases.
-
-The [revolute-joint foundation](docs/RevoluteJointFoundation.md) documents the
-five constraint equations, analytic derivatives, reaction units, numerical
-controls, and regressions. Start with the short programs below, then use the
-[practical revolute-joint guide](docs/RevoluteJointExamples.md) for accumulated
-turns, paired axle torques, gyroscopic bearing reactions, and normal contact.
-
 ## Quick start
 
-Install a stable .NET 10 SDK compatible with `global.json` (currently selecting
-10.0.400 in the 10.0.4xx feature band; see [SDK and editor compatibility](#sdk-and-editor-compatibility)).
-From the repository root, build the library and run the MSTest suite:
+Install a stable .NET 10 SDK in the **10.0.4xx** feature band. The repository's
+`global.json` starts at **10.0.400**, selects the latest installed patch within
+that band, and excludes prerelease SDKs. Both projects target `net10.0`.
+Run `dotnet --version` from the repository root to check the selected SDK.
+[.NET SDK selection](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json)
+
+From the repository root, build the solution and run the MSTest suite in Debug
+and Release. The build restores the required test packages.
 
 ```powershell
 dotnet build QuantumDynamixLib.sln --configuration Debug
 dotnet test QuantumDynamixLib.sln --configuration Debug
+dotnet build QuantumDynamixLib.sln --configuration Release
+dotnet test QuantumDynamixLib.sln --configuration Release
 ```
 
-To try the library from another .NET 10 project, these commands create a sibling
-console project and reference the core library directly:
+To try the library, create a sibling console project and add a reference to the
+core project. Use the same project reference from an existing .NET 10 project.
 
 ```powershell
 dotnet new console --name QuantumDynamixDemo --output ../QuantumDynamixDemo --framework net10.0
 dotnet add ../QuantumDynamixDemo/QuantumDynamixDemo.csproj reference ./QuantumDynamixLib.csproj
 ```
 
-Replace the generated `Program.cs` with any one complete C# example below, then run
-it from the repository root:
+Replace the generated `Program.cs` with one of the [usage examples](#usage-examples),
+following its setup instructions, then run this command from the repository root.
 
 ```powershell
 dotnet run --project ../QuantumDynamixDemo/QuantumDynamixDemo.csproj
 ```
 
-For an existing project, use its `.csproj` path in the `dotnet add ... reference`
-command. Only `QuantumDynamixLib.csproj` is needed; the subsystem folders are part
-of that single assembly. See [Development infrastructure](#development-infrastructure)
-for Release builds, formatting checks, and editor setup.
+## Current capabilities and source layout
+
+[QuantumDynamixLib.sln](QuantumDynamixLib.sln) contains the single core class
+library [QuantumDynamixLib.csproj](QuantumDynamixLib.csproj) and the separate
+MSTest project [QuantumDynamix.Tests](QuantumDynamix.Tests/QuantumDynamix.Tests.csproj).
+The subsystem folders below organize source within the core assembly, which
+has no external package or application framework dependencies.
+
+| Source area | Implemented on `main` |
+| --- | --- |
+| `QuantumDynamix.Math` | Double-precision vectors, 3×3 matrices, and Hamilton quaternions. Easing functions, time and distance timelines, feature-relative anchors, and multichannel regions with sided evaluation and join diagnostics. |
+| `QuantumDynamix.Splines`, `QuantumDynamix.Geometry` | Scalar and spatial B-splines and NURBS with analytic derivatives, constrained fitting, and nondestructive smoothing. Rigid poses, curve curvature, arc-length maps, and rotation-minimizing frames. |
+| `QuantumDynamix.Track` | Banked heartlines, offset spines, and configurable rail arrangements and cross-sections. Rail surface queries, independent spine and rail distance maps, gauge measurements, and geometry diagnostics. Region-based longitudinal acceleration profiles integrate to speed and station for time-authored motion, or to speed and elapsed time for distance-authored motion. Time-authored motion can stop or reverse. Distance-authored motion requires verified positive forward speed. |
+| `QuantumDynamix.Physics` | Newton–Euler rigid-body dynamics with RK4 and spherical or revolute multibody constraints with projected implicit-midpoint integration. Revolute joints allow independent wheel spin and report bearing reactions. Wheel/rail contact provides signed-gap geometry on declared smooth patches, first-order rigid normal impulses, and a separate compliant normal-contact solver using caller-supplied power-law coefficients. |
+| `QuantumDynamix.FVD` | Forward force-vector design (FVD) evaluation for an ideal point with prescribed heartline motion. It calculates world coordinate acceleration and specific force in the banked track frame, using caller-supplied gravity. |
+| `QuantumDynamix.Supports` | Straight support-member geometry between a named rail-section datum and a supplied foundation point. |
+| `QuantumDynamix.Operations` | Block occupancy for one supplied train extent on an open or closed route, with an unknown state for missing or invalid localization. |
+| `QuantumDynamix.Telemetry` | Per-body center-of-mass position, speed, and instantaneous linear acceleration sampled at accepted constrained-step endpoints. |
+
+The project also reserves source areas for `QuantumDynamix.Units`,
+`QuantumDynamix.IO`, and `QuantumDynamix.Interop`. Full vehicle simulation,
+tangential wheel/rail friction, traction and braking mechanisms, structural
+support analysis, rendering, and UI are outside the current library scope.
+
+## M3.x development status
+
+The reconstruction development tree contains regression-tested work that is
+still pending integration into `main`.
+
+| Milestone | Verified in development |
+| --- | --- |
+| M3 | Reconstructs a numerical 3D heartline from prescribed longitudinal motion, transverse acceleration, and banking profiles. Regression cases include straights, circular arcs, a helix, and time- and distance-authored inputs. |
+| M3.1 | Fits the numerical heartline to a quintic spline for `HeartlineTrack`. Independent samples check geometry, banking, and acceleration through the forward FVD evaluator. |
+| M3.2 | Stabilizes frame transport when authored knots and generated sample parameters collide at floating-point resolution. Adds regression coverage and preserves numerical context for fit, arc-length, and frame-transport failures. |
+| M3.3 Phase 1 | Reduces allocations in adaptive quadrature and spline-basis evaluation. |
+
+### M3.3 Phase 2, Step 1
+
+The change on `main` replaces a capturing segment-search predicate in
+`ScalarTimeline.Evaluate` with an indexed scan. Regression tests exercise exact
+joins, adjacent floating-point coordinates, sided evaluation, and boundary
+policies. [Step 1 change and benchmark record](https://github.com/Coasterpete/QuantumDynamixLib/pull/1)
+
+An isolated Release probe measured **88 → 0 bytes per segment lookup**.
+In the **600 m distance-authored reconstruction** benchmark on the development
+tree, the same fixture and tolerances produced **40.3% fewer total allocated
+bytes** and **11.0% lower median runtime** (8.158 s → 7.263 s across three warmed
+Release runs per version). Numerical results and work accounting were
+unchanged, including reconstruction and fit diagnostics, 74,802,135 quadrature
+evaluations, and reconstruction `WorkUsed` of 4,320,117.
+
+## Engineering guides
+
+- Spline definitions, arc length, easing, timelines, anchors, and constrained
+  smoothing. [Spline and timeline foundation](docs/SplineTimelineFoundation.md)
+- Rail arrangements, analytic offsets, distance maps, gauge, and continuity
+  diagnostics. [Physical rail geometry foundation](docs/PhysicalRailGeometryFoundation.md)
+- Revolute constraint equations, reaction units, independent spin, and C#
+  examples for angle history, axle torque, and gyroscopic coupling.
+  [Revolute-joint foundation](docs/RevoluteJointFoundation.md)
+  · [Revolute-joint examples](docs/RevoluteJointExamples.md)
+- Signed-gap geometry, rigid impulses, compliant normal forces, and solver
+  limits. [Rigid wheel/rail contact foundation](docs/WheelRailContactFoundation.md)
+  · [Compliant normal-contact foundation](docs/CompliantWheelRailContactFoundation.md)
+  · [Wheel/rail contact examples](docs/WheelRailContactExamples.md)
 
 ## Usage examples
 
@@ -492,96 +499,16 @@ geometry and timestep limitations and implement normal interaction only.
 
 ## Development infrastructure
 
-`QuantumDynamixLib.sln` contains one `net10.0` core class library and one MSTest
-project. The core project explicitly includes C# sources from the existing
-subsystem directories and excludes tests and generated files. Existing folders,
-including `QuantumDynamix.Splines/Curves` and `QuantumDynamix.Tests/Application`,
-retain their owner-defined organization. The core library has no external package
-dependencies or application-framework dependencies; test packages are confined to
-`QuantumDynamix.Tests`.
+`Directory.Build.props` enables deterministic compilation, nullable reference
+checking, and the SDK's built-in analyzers. The test project uses
+`Microsoft.NET.Test.Sdk`, `MSTest.TestAdapter`, and `MSTest.TestFramework`.
+Run `dotnet sln QuantumDynamixLib.sln list` to see the two projects.
 
-### SDK and editor compatibility
-
-`global.json` selects the installed stable .NET SDK **10.0.400**, accepts newer
-installed servicing patches in the **10.0.4xx** feature band, and excludes
-prerelease SDKs. This selects the development toolchain; it does not choose a
-library target framework. See Microsoft's [SDK selection documentation](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
-
-The setup machine has the following tools installed:
-
-| Tool | Installed version(s) |
-| --- | --- |
-| .NET SDK | 8.0.303, 8.0.422, 9.0.313, 9.0.315, **10.0.400** |
-| SDK MSBuild | 18.9.6 |
-| Visual Studio Community 2026 | 18.9.1 |
-| Visual Studio Community 2022 | 17.14.31 |
-| Visual Studio Code | 1.145.2 |
-| Git for Windows | 2.55.0.windows.3 |
-
-Visual Studio 2026 18.9.1 is compatible with the selected SDK. Visual Studio 2022
-17.14 cannot build projects with this selected SDK: the 10.0.400 SDK requires
-Visual Studio 18.0 or newer. See Microsoft's [SDK and Visual Studio compatibility table](https://learn.microsoft.com/en-us/dotnet/core/porting/versioning-sdk-msbuild-vs).
-
-In Visual Studio 2026, open `QuantumDynamixLib.sln`. In VS Code, open the repository
-folder (`code .`). The workspace recommends the Microsoft C# and EditorConfig
-extensions, both already installed on the setup machine. C# Dev Kit is also
-installed locally and is optional. C# files use the Microsoft C# formatter on
-save. Build, formatting verification, and test commands are available through
-**Tasks: Run Task**; **Ctrl+Shift+B** selects the Debug build task. Build and test
-tasks build and test the production library and its MSTest project.
-
-### Shared conventions
-
-- `.editorconfig` specifies UTF-8, LF line endings, four-space C# indentation,
-  braces on new lines, and System imports first. JSON and MSBuild XML use two
-  spaces. Solution files retain conventional BOM, CRLF, and tab formatting.
-  C# style preferences are editor suggestions.
-- `.gitattributes` keeps text line endings consistent across Git checkouts,
-  including when a developer has `core.autocrlf` enabled.
-- `Directory.Build.props` enables deterministic compilation and, for C#
-  projects, nullable reference checking and the SDK's built-in analyzers with
-  the latest stable rule version and the standard `Default` rule set.
-- Compiler warning levels and Debug/Release behavior use SDK defaults. Warnings
-  are not promoted to errors, and code-style rules are not enforced on build.
-  No analyzer packages or other dependencies are added.
-- The existing Visual Studio `.gitignore` covers build outputs, IDE caches,
-  per-user settings, test results, and common tooling artifacts. It already
-  permits shared VS Code settings, extension recommendations, and tasks.
-
-These shared properties apply to C# projects beneath the repository root.
-Individual project files can override them. Both current projects target
-`net10.0`; the test project references the single core library. The SDK chooses
-the default C# language version. Test execution uses MSTest through VSTest.
-
-### Commands
-
-Run these from the repository root to inspect the toolchain and solution:
-
-```powershell
-dotnet --info
-dotnet --list-sdks
-dotnet --version
-dotnet sln QuantumDynamixLib.sln list
-```
-
-Build and verify the implementation with:
-
-```powershell
-# Build (also restores required packages).
-dotnet build QuantumDynamixLib.sln --configuration Debug
-dotnet build QuantumDynamixLib.sln --configuration Release
-
-# Check formatting after restore/build; apply formatting with the second command.
-dotnet format QuantumDynamixLib.sln --verify-no-changes --no-restore
-dotnet format QuantumDynamixLib.sln --no-restore
-
-# Run the MSTest suite.
-dotnet test QuantumDynamixLib.sln --configuration Debug
-dotnet test QuantumDynamixLib.sln --configuration Release
-```
-
-Check that test execution reports discovered and executed tests; a successful
-command alone is not evidence of coverage or engineering validation.
+Open `QuantumDynamixLib.sln` in a Visual Studio version that supports
+`net10.0` and the selected SDK, or open the repository folder in VS Code.
+The VS Code workspace recommends the Microsoft C# and EditorConfig extensions
+and provides build, formatting check, and test tasks. **Ctrl+Shift+B** runs the
+Debug build task. [SDK and Visual Studio compatibility](https://learn.microsoft.com/en-us/dotnet/core/porting/versioning-sdk-msbuild-vs)
 
 ## Unconstrained rigid-body foundation
 
@@ -643,10 +570,9 @@ engineering requirements, and future changes remain human-directed; see
 
 The owner approved full rigid-body coordinates, Lagrange-multiplier bilateral
 constraints, body-local spherical-joint attachments, coupled dense Cholesky
-solving, and separate projected implicit-midpoint integration. The existing
-unconstrained dynamics, RK4 implementation, and original 48 regression cases are
-unchanged. Both paths use the same assembly, mathematics, units, and frame
-conventions. No package dependency was added.
+solving, and separate projected implicit-midpoint integration. The unconstrained
+and constrained paths use the same assembly, mathematics, units, and frame
+conventions.
 
 ### Definitions, state, and reactions
 
