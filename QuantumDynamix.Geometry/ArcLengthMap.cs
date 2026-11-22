@@ -37,11 +37,17 @@ public sealed class ArcLengthMap
         int subintervals = 0;
         for (int i = 1; i < parameters.Length; i++)
         {
-            QuadratureResult result = IntegrateSpan(parameters[i - 1], parameters[i]);
+            double a = parameters[i - 1];
+            double b = parameters[i];
+            QuadratureResult result = IntegrateSpan(a, b);
             stations[i] = stations[i - 1] + result.Value;
             errors[i] = errors[i - 1] + result.EstimatedAbsoluteError;
             if (!double.IsFinite(stations[i]) || !(stations[i] > stations[i - 1]))
-            { throw new ArgumentException("A zero-length or numerically unresolved span prevents invertible station mapping.", nameof(curve)); }
+            {
+                throw new ArgumentException(FormattableString.Invariant(
+                    $"Arc-length integration cannot advance the cumulative station over spline parameters [{a:R}, {b:R}]. The integrated span length is {result.Value:R} m after {result.Subintervals} quadrature subintervals."),
+                    nameof(curve));
+            }
             evaluations = checked(evaluations + result.Evaluations);
             subintervals = checked(subintervals + result.Subintervals);
         }
@@ -71,8 +77,10 @@ public sealed class ArcLengthMap
         double parameter = low + (high - low) * ((station - stations[index]) / (stations[index + 1] - stations[index]));
         double residual = double.PositiveInfinity;
         double error = errors[index];
+        int iterations = 0;
         for (int iteration = 1; iteration <= maximumIterations; iteration++)
         {
+            iterations = iteration;
             QuadratureResult partial = IntegrateSpan(parameters[index], parameter);
             residual = stations[index] + partial.Value - station;
             error = errors[index] + partial.EstimatedAbsoluteError;
@@ -84,7 +92,14 @@ public sealed class ArcLengthMap
             if (!(next > low && next < high)) { break; }
             parameter = next;
         }
-        throw new NumericalConvergenceException("Arc-length inversion did not meet its station error budget (metres).", maximumIterations, System.Math.Abs(residual) + error);
+        double combinedError = System.Math.Abs(residual) + error;
+        throw new NumericalConvergenceException(FormattableString.Invariant(
+            $"Arc-length inversion for station {station:R} m failed after {iterations} iterations. The spline parameter bracket is [{low:R}, {high:R}]. The absolute station residual plus estimated length error is {combinedError:R} m against a limit of {tolerance:R} m."),
+            iterations, combinedError)
+        {
+            ParameterInterval = (low, high),
+            ResidualBudget = ("Absolute station residual plus arc-length error estimate", "m", tolerance)
+        };
     }
 
     private QuadratureResult IntegrateSpan(double a, double b)
@@ -93,6 +108,23 @@ public sealed class ArcLengthMap
         double fraction = (b - a) / (Curve.Maximum - Curve.Minimum);
         var local = new QuadratureSettings(System.Math.Max(double.Epsilon, Settings.AbsoluteTolerance * fraction / 4),
             Settings.RelativeTolerance / 4, Settings.MaximumDepth, Settings.MaximumEvaluations);
-        return AdaptiveGaussKronrod.Integrate(x => Curve.Evaluate(x, EvaluationSide.Right).FirstDerivative.Length, a, b, local);
+        try { return AdaptiveGaussKronrod.Integrate(x => Curve.Evaluate(x, EvaluationSide.Right).FirstDerivative.Length, a, b, local); }
+        catch (NumericalConvergenceException ex)
+        {
+            double? tolerance = ex.ResidualBudget?.Limit;
+            string limit = tolerance is double value ? FormattableString.Invariant($" against a limit of {value:R} m") : "";
+            throw new NumericalConvergenceException(FormattableString.Invariant(
+                $"Arc-length integration failed with an estimated length error of {ex.Residual:R} m{limit}. {ex.Message}"),
+                ex.Iterations, ex.Residual, ex)
+            {
+                ParameterInterval = (a, b),
+                ResidualBudget = tolerance.HasValue ? ("Arc-length quadrature error estimate", "m", tolerance.Value) : null
+            };
+        }
+        catch (ArithmeticException ex)
+        {
+            throw new ArithmeticException(FormattableString.Invariant(
+                $"Arc-length integration failed over spline parameters [{a:R}, {b:R}]. {ex.Message}"), ex);
+        }
     }
 }

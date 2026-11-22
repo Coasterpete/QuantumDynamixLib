@@ -29,7 +29,9 @@ public sealed class NumericalConvergenceException : InvalidOperationException
 {
     public int Iterations { get; }
     public double Residual { get; }
-    internal NumericalConvergenceException(string message, int iterations, double residual) : base(message)
+    internal (double Start, double End)? ParameterInterval { get; init; }
+    internal (string Quantity, string Unit, double Limit)? ResidualBudget { get; init; }
+    internal NumericalConvergenceException(string message, int iterations, double residual, Exception? inner = null) : base(message, inner)
     { Iterations = iterations; Residual = residual; }
 }
 
@@ -73,14 +75,20 @@ public static class AdaptiveGaussKronrod
         int evaluations = 15;
         double total = intervals[0].Value;
         double error = intervals[0].Error;
-        while (error > settings.AbsoluteTolerance + settings.RelativeTolerance * System.Math.Abs(total))
+        double tolerance = settings.AbsoluteTolerance + settings.RelativeTolerance * System.Math.Abs(total);
+        while (error > tolerance)
         {
             int worst = 0;
             for (int i = 1; i < intervals.Count; i++) { if (intervals[i].Error > intervals[worst].Error) { worst = i; } }
             Interval old = intervals[worst];
             double middle = old.Minimum + (old.Maximum - old.Minimum) / 2;
             if (old.Depth >= settings.MaximumDepth || evaluations > settings.MaximumEvaluations - 30 || !(middle > old.Minimum && middle < old.Maximum))
-            { throw new NumericalConvergenceException("Quadrature exhausted its finite subdivision/evaluation budget.", evaluations, error); }
+            {
+                throw new NumericalConvergenceException(FormattableString.Invariant(
+                    $"Quadrature exhausted its subdivision or evaluation budget over [{minimum:R}, {maximum:R}] after {evaluations} integrand evaluations. The active subinterval count is {intervals.Count}."),
+                    evaluations, error)
+                { ResidualBudget = ("Quadrature error estimate", "integral units", tolerance) };
+            }
             Interval left = Rule(old.Minimum, middle, old.Depth + 1);
             Interval right = Rule(middle, old.Maximum, old.Depth + 1);
             intervals[worst] = left;
@@ -88,6 +96,7 @@ public static class AdaptiveGaussKronrod
             total += left.Value + right.Value - old.Value;
             error = System.Math.Max(0, error + left.Error + right.Error - old.Error);
             evaluations += 30;
+            tolerance = settings.AbsoluteTolerance + settings.RelativeTolerance * System.Math.Abs(total);
         }
         if (!double.IsFinite(total) || !double.IsFinite(error)) { throw new ArithmeticException("Quadrature exceeds finite range."); }
         return new(total, error, evaluations, intervals.Count);
