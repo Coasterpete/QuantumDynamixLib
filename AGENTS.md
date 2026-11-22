@@ -142,9 +142,17 @@ Determine whether the request is for explanation/review, a design proposal, or a
 
 The goal is meaningful progress on QUANTUM DYNAMIX while helping the owner **understand, write, debug, and maintain their own engineering software**.
 
-## 10. GitHub pull requests and milestone merges
+## 10. Git workflow — direct push to main
 
-- For an owner-authorized implementation milestone, this section grants standing permission to push its feature branch, open or update its pull request, and merge it into `main` after verification. Follow any task-specific instruction to keep work local, stop for review, or defer the merge.
-- Confirm that the pull request contains only the authorized changes and preserve unrelated working-tree work. Run the required tests against the exact pull request head and record the results. If the head changes, verify the new revision before merging.
-- After local verification passes, use GitHub auto-merge when available so GitHub can wait for required checks and reviews. Otherwise, wait for the pull request to meet the repository's merge requirements and merge it without a second approval from the owner. Leave the pull request open while checks or reviews are unresolved, or if verification fails, conflicts remain, or the merge would exceed the authorized scope.
-- Merge only through the pull request and honor branch protections. Verify the result and report the pull request link, merge commit SHA, and test results.
+For explicitly authorized and successfully verified development milestones, the agent may commit and push the approved changes directly to `main` without creating a pull request or requesting an additional Git approval. Follow task-specific instructions to keep work local or stop for review.
+
+- Inspect the current branch, working tree, and remote state before changing Git history. Ensure local `main` includes the latest remote `main` before pushing.
+- Run relevant Debug and Release tests on the exact changes to be committed, and report the actual results.
+- Stage only files belonging to the authorized task. Preserve unrelated or unfinished working-tree changes; do not include them just to make the tree clean.
+- Commit with a descriptive message and push using `git push origin main` from an up-to-date local `main` branch.
+- Do not create pull requests for routine authorized milestones unless the owner requests one or repository rules require one.
+- Never force-push, rewrite unrelated history, bypass branch protection, discard local changes, or overwrite remote changes.
+- Stop and report the blocker if tests fail, the remote has diverged, conflicts occur, unexpected changes appear, or branch rules prevent a direct push.
+- Report the commit SHA, test results, and push status concisely.
+
+This standing Git authorization applies only to owner-authorized changes. It does not authorize new features, architectural decisions, or unrelated engineering implementations.
