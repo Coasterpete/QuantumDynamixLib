@@ -65,7 +65,7 @@ support analysis, rendering, and UI are outside the current library scope.
 
 ## M3.x development status
 
-The table reflects `main` at commit `da1a5ae`.
+The M3.3 Phase 2 implementation is complete on `main` at `a5e38f6`.
 
 | Milestone | Status on `main` | Functionality |
 | --- | --- | --- |
@@ -74,20 +74,34 @@ The table reflects `main` at commit `da1a5ae`.
 | M3.2 | Integrated | Stabilizes frame transport when authored knots and generated sample parameters collide at floating-point resolution. Adds regression coverage and preserves numerical context for fit, arc-length, and frame-transport failures. |
 | M3.3 Phase 1 | Integrated | Reduces allocations in adaptive quadrature and spline-basis evaluation. |
 | M3.3 Phase 2, Step 1 | Integrated | Replaces a capturing segment-search predicate in `ScalarTimeline.Evaluate` with an indexed scan. |
-| M3.3 Phase 2, Step 2 | Pending | |
+| M3.3 Phase 2, Step 2 | Integrated | Removes the per-node capturing callback in longitudinal squared-speed quadrature. |
+| M3.3 Phase 2, Step 3 | Integrated | Reuses eligible motion samples at reconstruction retry starts while preserving work accounting. |
+| M3.3 Phase 2, Step 4 | Integrated | Shares a fitted arc-length inversion within each forward verification probe. |
 
-### M3.3 Phase 2, Step 1
+### M3.3 Phase 2 performance
 
-Regression tests exercise exact joins, adjacent floating-point coordinates,
-sided evaluation, and boundary policies. [Step 1 change and benchmark record](https://github.com/Coasterpete/QuantumDynamixLib/pull/1)
+The 600 m distance-authored fixture used the same numerical settings in every
+.NET 10 Release build. Each comparison is against the preceding version.
 
-An isolated Release probe measured **88 → 0 bytes per segment lookup**.
-In the **600 m distance-authored reconstruction** benchmark on the development
-tree, the same fixture and tolerances produced **40.3% fewer total allocated
-bytes** and **11.0% lower median runtime** (8.158 s → 7.263 s across three warmed
-Release runs per version). Numerical results and work accounting were
-unchanged, including reconstruction and fit diagnostics, 74,802,135 quadrature
-evaluations, and reconstruction `WorkUsed` of 4,320,117.
+- **Step 1** removed 88 bytes per segment lookup in the isolated probe and
+  reduced reconstruction allocations by **40.3%**. Median reconstruction
+  time fell **16.8%** in the closeout. Quadrature work stayed the same.
+  Regression tests cover exact joins, adjacent floating-point coordinates,
+  sided evaluation and boundary policies.
+  [Original Step 1 benchmark](https://github.com/Coasterpete/QuantumDynamixLib/pull/1)
+- **Step 2** reduced reconstruction allocations by **72.4%** with the
+  same quadrature count. Median reconstruction time fell **14.2%**.
+- **Step 3** reduced reconstruction quadrature evaluations by **6.0%**
+  and allocations by **5.9%**. Reconstruction was faster in five of six
+  interleaved rounds. The timing differences varied between pairs.
+- **Step 4** halved fitted arc-length inversions in verification and reduced its
+  spline-basis evaluations by **40.8%**. Forward verification allocated
+  **32.4% less** and its median elapsed time fell **29.5%**.
+  The full fit allocated **29.1% less** and its median fell **12.1%**.
+
+Reconstruction `WorkUsed` stayed at **4,320,117** across all four steps.
+The report records the numerical comparisons and timing ranges.
+[M3.3 Phase 2 benchmark report](docs/M3.3Phase2Benchmark.md)
 
 ## Engineering guides
 
