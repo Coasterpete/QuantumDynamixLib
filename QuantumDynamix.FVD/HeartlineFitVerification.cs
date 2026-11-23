@@ -66,7 +66,7 @@ internal sealed class HeartlineFitVerification(ReconstructedHeartline source, He
     {
         ReconstructedHeartlineSample expected = source.Evaluate(s, side);
         LongitudinalMotionSample motion = HeartlineFitMapping.TransformMotion(track.HeartlineStations, expected, side, out double lengthError);
-        HeartlineForceSample actual = HeartlineForceEvaluator.Evaluate(track, motion, Vector3d.Zero, side);
+        HeartlineForceSample actual = HeartlineForceEvaluator.EvaluateFitted(track, source, motion, side);
         Vector3d world = actual.WorldCoordinateAcceleration;
         Vector3d forward = actual.BankedFrame.Forward;
         Vector3d observedCurvature = (world - forward * motion.LongitudinalAccelerationMetresPerSecondSquared)

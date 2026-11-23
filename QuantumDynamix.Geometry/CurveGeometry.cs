@@ -17,7 +17,11 @@ public static class CurveGeometry
     public static CurveGeometrySample Evaluate(SplineCurve3d curve, double parameter, EvaluationSide side = EvaluationSide.Automatic)
     {
         ArgumentNullException.ThrowIfNull(curve);
-        CurveJet3d jet = curve.Evaluate(parameter, side);
+        return Evaluate(curve.Evaluate(parameter, side));
+    }
+
+    internal static CurveGeometrySample Evaluate(CurveJet3d jet)
+    {
         Vector3d d1 = jet.FirstDerivative;
         Vector3d d2 = jet.SecondDerivative;
         double speed = d1.Length;

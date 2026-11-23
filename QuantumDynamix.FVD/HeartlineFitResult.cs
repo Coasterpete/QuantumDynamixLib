@@ -59,28 +59,31 @@ internal static class HeartlineFitMapping
     {
         // All authored bank breakpoints are retained as spline knots. The arc-length map
         // returns their exact corresponding parameter on a sided query at a cached node.
-        return new CustomFunction(0, map.Length, Evaluate, map.Nodes.Skip(1).SkipLast(1).Select(node => node.Station));
+        return new CustomFunction(0, map.Length,
+            (station, side) => BankAtParameter(source, map.Curve, map.Invert(station).Parameter, side),
+            map.Nodes.Skip(1).SkipLast(1).Select(node => node.Station));
+    }
 
-        ScalarJet Evaluate(double station, EvaluationSide side)
-        {
-            double u = map.Invert(station).Parameter;
-            EvaluationSide limit = Inward(u, source.LengthMetres, side);
-            ScalarJet original = source.BankAt(u, limit);
-            CurveJet3d curve = map.Curve.Evaluate(u, limit);
-            int order = System.Math.Min(original.DerivativeOrder, curve.DerivativeOrder);
-            if (order == 0) { return new(original.Value, derivativeOrder: 0); }
-            double h = curve.FirstDerivative.Length;
-            double first = original.FirstDerivative / h;
-            if (order == 1) { return new(original.Value, first, derivativeOrder: 1); }
-            Vector3d tangent = curve.FirstDerivative / h;
-            double dh = Vector3d.Dot(tangent, curve.SecondDerivative);
-            double second = (original.SecondDerivative / h - first * (dh / h)) / h;
-            if (order == 2) { return new(original.Value, first, second, derivativeOrder: 2); }
-            Vector3d dT = (curve.SecondDerivative - tangent * dh) / h;
-            double ddh = Vector3d.Dot(dT, curve.SecondDerivative) + Vector3d.Dot(tangent, curve.ThirdDerivative);
-            double third = (original.ThirdDerivative / h - 3 * second * dh - first * (ddh / h)) / h / h;
-            return new(original.Value, first, second, third);
-        }
+    internal static ScalarJet BankAtParameter(ReconstructedHeartline source, SplineCurve3d curve,
+        double u, EvaluationSide side, CurveJet3d? geometryJet = null)
+    {
+        EvaluationSide limit = Inward(u, source.LengthMetres, side);
+        ScalarJet original = source.BankAt(u, limit);
+        // An interior station can invert to an endpoint, where banking independently uses the inward limit.
+        CurveJet3d jet = limit == side && geometryJet.HasValue ? geometryJet.Value : curve.Evaluate(u, limit);
+        int order = System.Math.Min(original.DerivativeOrder, jet.DerivativeOrder);
+        if (order == 0) { return new(original.Value, derivativeOrder: 0); }
+        double h = jet.FirstDerivative.Length;
+        double first = original.FirstDerivative / h;
+        if (order == 1) { return new(original.Value, first, derivativeOrder: 1); }
+        Vector3d tangent = jet.FirstDerivative / h;
+        double dh = Vector3d.Dot(tangent, jet.SecondDerivative);
+        double second = (original.SecondDerivative / h - first * (dh / h)) / h;
+        if (order == 2) { return new(original.Value, first, second, derivativeOrder: 2); }
+        Vector3d dT = (jet.SecondDerivative - tangent * dh) / h;
+        double ddh = Vector3d.Dot(dT, jet.SecondDerivative) + Vector3d.Dot(tangent, jet.ThirdDerivative);
+        double third = (original.ThirdDerivative / h - 3 * second * dh - first * (ddh / h)) / h / h;
+        return new(original.Value, first, second, third);
     }
 
     internal static LongitudinalMotionSample TransformMotion(ArcLengthMap map, ReconstructedHeartlineSample source,

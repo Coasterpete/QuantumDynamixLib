@@ -6,6 +6,7 @@ using QuantumDynamix.Geometry;
 using QuantumDynamix.Math;
 using QuantumDynamix.Math.Functions;
 using QuantumDynamix.Math.Timelines;
+using QuantumDynamix.Splines.Curves;
 using QuantumDynamix.Splines.Fitting;
 using QuantumDynamix.Track;
 using static QuantumDynamix.Tests.HeartlineReconstructionFixtures;
@@ -111,8 +112,54 @@ public sealed class HeartlineSplineConversionTests
             Assert.AreEqual(adjacent < 5 ? 0 : 5, near.WorldCoordinateAcceleration.Y, 2e-9);
         }
 
+        foreach (double station in new[] { System.Math.BitDecrement(fitted), fitted, System.Math.BitIncrement(fitted) })
+        {
+            foreach (EvaluationSide side in new[] { EvaluationSide.Left, EvaluationSide.Right })
+            {
+                var motion = fit.GetFittedMotion(5, side) with { HeartlineStationMetres = station };
+                Assert.AreEqual(HeartlineForceEvaluator.Evaluate(track, motion, Vector3d.Zero, side),
+                    HeartlineForceEvaluator.EvaluateFitted(track, source, motion, side));
+            }
+        }
+
         HeartlineForceSample Force(EvaluationSide side) =>
             HeartlineForceEvaluator.Evaluate(track, fit.GetFittedMotion(5, side), Vector3d.Zero, side);
+    }
+
+    [TestMethod]
+    public void SharedFitProjectionUsesTheAcceptedParameterAndPreservesBankDerivatives()
+    {
+        var source = Reconstruct([Targets(0, 1, 0)], Distance(0, 1),
+            Function(ProfileDomain.Distance, 0, 1, u => new(u * u * u, 3 * u * u, 6 * u, 6)));
+        // x(u) = u + u² makes parameter speed vary, and the loose map exposes acceptance at u != input.
+        var curve = SplineCurve3d.Clamped([Vector3d.Zero, Vector3d.UnitX * 0.5, Vector3d.UnitX * 2], 2);
+        var map = new ArcLengthMap(curve, new(0.1, 0));
+        var track = new HeartlineTrack(map, Vector3d.UnitZ, TrackOffsetProfile.Constant(Vector3d.Zero, map.Length),
+            HeartlineFitMapping.Bank(source, map), null, 1e-8);
+        const double input = 0.4;
+        double station = map.StationAt(input);
+        double u = map.Invert(station).Parameter;
+        Assert.AreNotEqual(input, u);
+        ScalarJet bank = track.Banking.Evaluate(station, EvaluationSide.Right);
+        double speed = 1 + 2 * u;
+        Assert.AreEqual(u * u * u, bank.Value);
+        Assert.AreEqual(3 * u * u / speed, bank.FirstDerivative, 2e-14);
+        Assert.AreEqual(6 * u / System.Math.Pow(speed, 2) - 6 * u * u / System.Math.Pow(speed, 3),
+            bank.SecondDerivative, 2e-14);
+        Assert.AreEqual(6 / System.Math.Pow(speed, 3) - 36 * u / System.Math.Pow(speed, 4)
+            + 36 * u * u / System.Math.Pow(speed, 5), bank.ThirdDerivative, 2e-14);
+
+        // The first positive station rounds back to the start parameter even on a left query.
+        Assert.AreEqual(0, map.Invert(double.Epsilon).Parameter);
+        foreach (double probe in new[] { 0, double.Epsilon, station, map.Length })
+        {
+            foreach (EvaluationSide side in Enum.GetValues<EvaluationSide>())
+            {
+                var motion = new LongitudinalMotionSample(0, probe, 10, 0, default);
+                Assert.AreEqual(HeartlineForceEvaluator.Evaluate(track, motion, Vector3d.Zero, side),
+                    HeartlineForceEvaluator.EvaluateFitted(track, source, motion, side));
+            }
+        }
     }
 
     [TestMethod]

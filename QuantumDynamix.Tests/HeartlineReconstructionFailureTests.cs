@@ -4,7 +4,9 @@ using QuantumDynamix.FVD;
 using QuantumDynamix.Geometry;
 using QuantumDynamix.Math;
 using QuantumDynamix.Math.Functions;
+using QuantumDynamix.Math.Numerics;
 using QuantumDynamix.Math.Timelines;
+using QuantumDynamix.Splines.Curves;
 using QuantumDynamix.Track;
 using static QuantumDynamix.Tests.HeartlineReconstructionFixtures;
 
@@ -171,6 +173,28 @@ public sealed class HeartlineReconstructionFailureTests
         Assert.IsTrue(double.IsFinite(measurement.Observed) && measurement.Observed > measurement.Limit);
         Assert.IsNotNull(fit.Diagnostics.Solver);
         Assert.AreSame(source, fit.Source);
+    }
+
+    [TestMethod]
+    public void SharedFitProjectionPropagatesInversionQuadratureExhaustion()
+    {
+        var source = Reconstruct([Targets(0, 1, 0)], Distance(0, 1));
+        var curve = SplineCurve3d.Clamped([Vector3d.Zero, new(1, 0.5, 0), new(2, 2, 0), new(3, 0, 0)], 3);
+        // The full span fits in one rule, but a partial integral during inversion needs a subdivision.
+        var map = new ArcLengthMap(curve, new QuadratureSettings(0.01, 0, maximumEvaluations: 15));
+        var track = new HeartlineTrack(map, Vector3d.UnitZ, TrackOffsetProfile.Constant(Vector3d.Zero, map.Length),
+            HeartlineFitMapping.Bank(source, map), null, 1e-8);
+        var motion = new LongitudinalMotionSample(0, map.Length * 0.875, 10, 0, default);
+        var expected = Assert.ThrowsExactly<NumericalConvergenceException>(() =>
+            HeartlineForceEvaluator.Evaluate(track, motion, Vector3d.Zero, EvaluationSide.Right));
+        var actual = Assert.ThrowsExactly<NumericalConvergenceException>(() =>
+            HeartlineForceEvaluator.EvaluateFitted(track, source, motion, EvaluationSide.Right));
+
+        Assert.AreEqual(15, actual.Iterations);
+        Assert.AreEqual(expected.Message, actual.Message);
+        Assert.AreEqual(expected.Residual, actual.Residual);
+        Assert.AreEqual(expected.ParameterInterval, actual.ParameterInterval);
+        Assert.AreEqual(expected.ResidualBudget, actual.ResidualBudget);
     }
 
     [TestMethod]
