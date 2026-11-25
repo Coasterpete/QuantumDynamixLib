@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ApplicationIcon>Assets/QuantumDynamix.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <ProjectReference Include="../QuantumDynamixLib.csproj" />
+    <AvaloniaResource Include="Assets/*.png" />
+    <InternalsVisibleTo Include="QuantumDynamix.Tests" />
+  </ItemGroup>
+</Project>

@@ -8,7 +8,7 @@ namespace QuantumDynamix.Track;
 internal sealed class TrajectoryWork(ProfileDomain domain, int maximumDepth, int maximumWork)
 {
     internal int MaximumDepth => maximumDepth;
-    private int Used { get; set; }
+    internal int Used { get; private set; }
     private int Remaining => maximumWork - Used;
 
     internal void Charge(double start, double end, int regionIndex, bool checkingPositivity = false)
@@ -33,10 +33,22 @@ internal sealed class TrajectoryWork(ProfileDomain domain, int maximumDepth, int
         try { return evaluate(); }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            throw Failure(TrajectoryFailureCode.EvaluationFailed, coordinate, coordinate, regionIndex,
-                "The authored acceleration failed to evaluate.", inner: exception);
+            throw EvaluationFailure(coordinate, regionIndex, exception);
         }
     }
+
+    internal ScalarJet EvaluateCharged(double coordinate, in TrajectoryPanel panel)
+    {
+        try { return panel.Evaluate(coordinate); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            throw EvaluationFailure(coordinate, panel.RegionIndex, exception);
+        }
+    }
+
+    private TrajectoryException EvaluationFailure(double coordinate, int regionIndex, Exception exception) =>
+        Failure(TrajectoryFailureCode.EvaluationFailed, coordinate, coordinate, regionIndex,
+            "The authored acceleration failed to evaluate.", inner: exception);
 
     internal QuadratureResult Integrate(TrajectoryPanel panel, double end, double absoluteTolerance,
         Func<double, double> integrand)

@@ -75,6 +75,23 @@ public sealed class GeometryTrackFoundationTests
     }
 
     [TestMethod]
+    public void UnconvergedInversionReportsStationResidualBudgetAndIterationCount()
+    {
+        var map = new ArcLengthMap(SplineFoundationTests.QuarterCircle(10));
+        double station = map.Length / 3;
+        var failure = Assert.ThrowsExactly<NumericalConvergenceException>(() => map.Invert(station, maximumIterations: 1));
+
+        Assert.AreEqual(1, failure.Iterations);
+        var interval = failure.ParameterInterval!.Value;
+        Assert.IsTrue(0 <= interval.Start && interval.Start < interval.End && interval.End <= 1);
+        var budget = failure.ResidualBudget!.Value;
+        Assert.AreEqual("m", budget.Unit);
+        Assert.AreEqual(map.Settings.AbsoluteTolerance + map.Settings.RelativeTolerance * map.Length, budget.Limit);
+        Assert.IsTrue(double.IsFinite(failure.Residual) && failure.Residual > budget.Limit);
+        StringAssert.Contains(failure.Message, "Arc-length inversion");
+    }
+
+    [TestMethod]
     public void QuadratureHandlesSmoothAndPiecewiseFunctionsAndReportsBudgetExhaustion()
     {
         Assert.AreEqual(2, AdaptiveGaussKronrod.Integrate(System.Math.Sin, 0, System.Math.PI).Value, 2e-14);
@@ -103,6 +120,100 @@ public sealed class GeometryTrackFoundationTests
         Assert.IsNull(frames.ClosureTwist);
         CurveFrame bank = frames.Evaluate(0.4).Banked(System.Math.PI / 2);
         TestMath.Near(Vector3d.UnitZ, bank.Left, 2e-14);
+    }
+
+    [TestMethod]
+    public void AdjacentFrameQueriesTransportUpToTheRequestedTangent()
+    {
+        const double origin = 1e15;
+        const double width = 128;
+        const double node = origin + width / 2;
+        var definition = new SplineDefinition(2, [origin, origin, origin, origin + width, origin + width, origin + width]);
+        var curve = new SplineCurve3d(definition, [Vector3d.Zero, Vector3d.UnitX, new(2, 1, 0)]);
+        var frames = new RotationMinimizingFrames(curve, Vector3d.UnitY);
+        Assert.IsTrue(frames.Nodes.Any(frameNode => frameNode.Parameter == node));
+        foreach (double parameter in new[] { System.Math.BitDecrement(node), System.Math.BitIncrement(node) })
+        {
+            double t = (parameter - origin) / width;
+            CurveFrame frame = frames.Evaluate(parameter);
+            TestMath.Near(new(2 * t, t * t, 0), frame.Position, 2e-14);
+            TestMath.Near(new Vector3d(1, t, 0).Normalized(), frame.Forward, 2e-14);
+            TestMath.Near(new Vector3d(-t, 1, 0).Normalized(), frame.Up, 2e-14);
+            TestMath.Near(frame.Up, Vector3d.Cross(frame.Forward, frame.Left), 2e-14);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void StraightFrameTransportKeepsTheAuthoredKnotBesideAGeneratedSeed(bool knotAfterSeed)
+    {
+        const double end = 262.5;
+        const double seed = end * 16 / 64;
+        double knot = knotAfterSeed ? System.Math.BitIncrement(seed) : System.Math.BitDecrement(seed);
+        var definition = new SplineDefinition(2, [0, 0, 0, knot, end, end, end]);
+        // For these quadratic knots, the averages of consecutive knots give controls for x(u) = u.
+        var curve = new SplineCurve3d(definition, [Vector3d.Zero, new(knot / 2, 0, 0), new((knot + end) / 2, 0, 0), new(end, 0, 0)]);
+        var frames = new RotationMinimizingFrames(curve, Vector3d.UnitZ);
+
+        Assert.IsTrue(frames.Nodes.Any(node => node.Parameter == knot));
+        Assert.IsFalse(frames.Nodes.Any(node => node.Parameter == seed));
+        foreach (double parameter in new[] { 0, seed, knot, end })
+        {
+            CurveFrame frame = frames.Evaluate(parameter);
+            TestMath.Near(new(parameter, 0, 0), frame.Position, 1e-12);
+            TestMath.Near(Vector3d.UnitX, frame.Forward, 2e-14);
+            TestMath.Near(Vector3d.UnitZ, frame.Up, 2e-14);
+        }
+    }
+
+    [TestMethod]
+    public void FrameQueriesUseTheRequestedTangentOnBothSidesOfAC1KnotBesideASeed()
+    {
+        double knot = System.Math.BitIncrement(0.5);
+        var definition = new SplineDefinition(2, [0, 0, 0, knot, 1, 1, 1]);
+        var curve = new SplineCurve3d(definition, [Vector3d.Zero, new(knot / 2, 0, 0), new((knot + 1) / 2, 0, 0), new(1, 1, 0)]);
+        var frames = new RotationMinimizingFrames(curve, Vector3d.UnitY);
+
+        Assert.AreEqual(1, definition.ContinuityAt(knot));
+        Assert.IsTrue(frames.Nodes.Any(node => node.Parameter == knot));
+        foreach (double parameter in new[] { System.Math.BitDecrement(knot), knot, System.Math.BitIncrement(knot) })
+        {
+            CurveJet3d jet = curve.Evaluate(parameter, EvaluationSide.Right);
+            CurveFrame frame = frames.Evaluate(parameter);
+            Assert.AreEqual(jet.Position, frame.Position);
+            TestMath.Near(jet.FirstDerivative.Normalized(), frame.Forward, 2e-14);
+            TestMath.Near(Vector3d.Cross(Vector3d.UnitZ, frame.Forward), frame.Up, 2e-14);
+        }
+        Assert.AreEqual(0, curve.Evaluate(knot, EvaluationSide.Left).SecondDerivative.Y);
+        Assert.IsTrue(curve.Evaluate(knot, EvaluationSide.Right).SecondDerivative.Y > 0);
+    }
+
+    [TestMethod]
+    public void AdjacentAuthoredKnotsReportAnUnresolvableFrameInterval()
+    {
+        const double a = 0.5;
+        double b = System.Math.BitIncrement(a);
+        var definition = new SplineDefinition(2, [0, 0, 0, a, b, 1, 1, 1]);
+        var curve = new SplineCurve3d(definition,
+            [Vector3d.Zero, new(a / 2, 0, 0), new((a + b) / 2, 0, 0), new((b + 1) / 2, 0, 0), Vector3d.UnitX]);
+
+        var failure = Assert.ThrowsExactly<NumericalConvergenceException>(() => new RotationMinimizingFrames(curve, Vector3d.UnitZ));
+        Assert.AreEqual((a, b), failure.ParameterInterval);
+        Assert.AreEqual(b - a, failure.Residual);
+        Assert.AreEqual(0, failure.Iterations);
+        Assert.IsNull(failure.ResidualBudget);
+        StringAssert.Contains(failure.Message, "spline parameter units");
+    }
+
+    [TestMethod]
+    public void RoundedZeroChordReportsFrameIntervalAndDepth()
+    {
+        var curve = SplineCurve3d.Clamped([new(1e15, 0, 0), new(1e15 + 1, 0, 0)], 1);
+        var failure = Assert.ThrowsExactly<InvalidOperationException>(() => new RotationMinimizingFrames(curve, Vector3d.UnitZ));
+        StringAssert.Contains(failure.Message, "zero displacement");
+        StringAssert.Contains(failure.Message, "spline parameters [0, 0.0078125]");
+        StringAssert.Contains(failure.Message, "subdivision depth 0");
     }
 
     [TestMethod]

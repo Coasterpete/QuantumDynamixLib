@@ -112,38 +112,52 @@ public sealed class SplineDefinition
         // Work only on the p+1 local basis functions; differentiate the degree recurrence.
         int p = Degree;
         int first = span - p;
-        double[,] previous = new double[derivativeOrder + 1, p + 2];
-        previous[0, p] = 1;
+        int columns = p + 2;
+        long bufferLength = (derivativeOrder + 1L) * columns;
+        const int MaximumStackEntries = 128;
+        Span<double> previous = bufferLength <= MaximumStackEntries
+            ? stackalloc double[(int)bufferLength] : new double[bufferLength];
+        Span<double> current = bufferLength <= MaximumStackEntries
+            ? stackalloc double[(int)bufferLength] : new double[bufferLength];
+        // Each pass overwrites a growing region. Inactive cells and the right sentinel stay zero.
+        previous.Clear();
+        current.Clear();
+        previous[p] = 1;
         for (int degree = 1; degree <= p; degree++)
         {
-            double[,] current = new double[derivativeOrder + 1, p + 2];
             for (int local = p - degree; local <= p; local++)
             {
                 int i = first + local;
                 double left = knots[i + degree] - knots[i];
                 double right = knots[i + degree + 1] - knots[i + 1];
-                current[0, local] = (left == 0 ? 0 : (parameter - knots[i]) / left * previous[0, local])
-                    + (right == 0 ? 0 : (knots[i + degree + 1] - parameter) / right * previous[0, local + 1]);
+                current[local] = (left == 0 ? 0 : (parameter - knots[i]) / left * previous[local])
+                    + (right == 0 ? 0 : (knots[i + degree + 1] - parameter) / right * previous[local + 1]);
                 for (int order = 1; order <= System.Math.Min(degree, derivativeOrder); order++)
                 {
-                    current[order, local] = (left == 0 ? 0 : degree / left * previous[order - 1, local])
-                        - (right == 0 ? 0 : degree / right * previous[order - 1, local + 1]);
+                    int index = order * columns + local;
+                    int previousIndex = index - columns;
+                    current[index] = (left == 0 ? 0 : degree / left * previous[previousIndex])
+                        - (right == 0 ? 0 : degree / right * previous[previousIndex + 1]);
                 }
             }
+            Span<double> reusable = previous;
             previous = current;
+            current = reusable;
         }
         double[] denominator = new double[derivativeOrder + 1];
         for (int order = 0; order <= derivativeOrder; order++)
         {
-            for (int j = 0; j <= p; j++) { denominator[order] += previous[order, j] * scaledWeights[first + j]; }
+            int row = order * columns;
+            for (int j = 0; j <= p; j++) { denominator[order] += previous[row + j] * scaledWeights[first + j]; }
         }
         if (!(denominator[0] > 0) || !double.IsFinite(denominator[0])) { throw new ArithmeticException("Rational denominator is not resolvable."); }
         double[,] rational = new double[derivativeOrder + 1, p + 1];
         for (int order = 0; order <= derivativeOrder; order++)
         {
+            int row = order * columns;
             for (int j = 0; j <= p; j++)
             {
-                double numerator = previous[order, j] * scaledWeights[first + j];
+                double numerator = previous[row + j] * scaledWeights[first + j];
                 double binomial = 1;
                 for (int k = 1; k <= order; k++)
                 {

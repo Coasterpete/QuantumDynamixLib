@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Numerics;
 using QuantumDynamix.Math.Functions;
 using QuantumDynamix.Math.Numerics;
 using QuantumDynamix.Math.Timelines;
@@ -12,8 +13,9 @@ public sealed partial class LongitudinalTrajectory
         double initialSpeed, DistanceTrajectorySettings settings, AccelerationRangeProvider? customRanges)
     {
         var work = new TrajectoryWork(ProfileDomain.Distance, settings.MaximumDepth, settings.MaximumWork);
-        ForwardPanel[] forwardPanels = ForwardSpeedValidation.Validate(panels, initialSpeed, customRanges, work);
-        var solution = new DistanceSolution(forwardPanels, profile.End - profile.Start, initialSpeed, settings, work);
+        ForwardPanel[] forwardPanels = ForwardSpeedValidation.Validate(panels, initialSpeed, customRanges, work,
+            out BigInteger minimumSquaredSpeed);
+        var solution = new DistanceSolution(forwardPanels, profile.End - profile.Start, initialSpeed, minimumSquaredSpeed, settings, work);
         return new(profile, forwardPanels.Select(panel => panel.Panel.End).Prepend(profile.Start).ToArray(), null, solution);
     }
 
@@ -23,18 +25,27 @@ public sealed partial class LongitudinalTrajectory
         private readonly DistancePrefix[] prefixes;
         private readonly double length;
         private readonly double squaredSpeedBudget;
+        private readonly BigInteger exactMinimumSquaredSpeed;
         internal DistanceTrajectorySettings Settings { get; }
         internal double InitialSpeed { get; }
+        internal double SpeedLowerBound { get; }
+        internal double SpeedUpperBound { get; }
+        internal double AccelerationMagnitude { get; }
 
-        internal DistanceSolution(ForwardPanel[] panels, double length, double initialSpeed, DistanceTrajectorySettings settings,
-            TrajectoryWork work)
+        internal DistanceSolution(ForwardPanel[] panels, double length, double initialSpeed, BigInteger exactMinimumSquaredSpeed,
+            DistanceTrajectorySettings settings, TrajectoryWork work)
         {
             this.panels = panels;
             this.length = length;
             Settings = settings;
             InitialSpeed = initialSpeed;
+            this.exactMinimumSquaredSpeed = exactMinimumSquaredSpeed;
 
             double minimumSquaredSpeed = panels.Min(panel => panel.SquaredSpeedLower);
+            SpeedLowerBound = System.Math.BitDecrement(System.Math.Sqrt(minimumSquaredSpeed));
+            SpeedUpperBound = System.Math.BitIncrement(System.Math.Sqrt(panels.Max(panel => panel.SquaredSpeedUpper)));
+            AccelerationMagnitude = panels.Max(panel => System.Math.Max(System.Math.Abs(panel.Range.LowerMetresPerSecondSquared),
+                System.Math.Abs(panel.Range.UpperMetresPerSecondSquared)));
             double halfMinimum = minimumSquaredSpeed / 2;
             double rootHalfMinimum = System.Math.Sqrt(halfMinimum);
             // A q error of at most half the proved minimum leaves a positive margin for the reciprocal square root.
@@ -55,6 +66,9 @@ public sealed partial class LongitudinalTrajectory
             for (int i = 0; i < panels.Length; i++)
             { prefixes[i + 1] = Advance(panels[i], panels[i].Panel.End, prefixes[i], work); }
         }
+
+        internal bool MeetsSpeedFloor(double minimumSpeed) =>
+            ForwardSpeedValidation.MeetsSquaredSpeedFloor(exactMinimumSquaredSpeed, minimumSpeed);
 
         internal DistancePrefix At(double coordinate, int index, TrajectoryWork work)
         {
@@ -130,7 +144,7 @@ public sealed partial class LongitudinalTrajectory
                 {
                     QuadratureResult change = work.Integrate(panel, coordinate, squaredSpeedTolerance, station =>
                     {
-                        double acceleration = work.EvaluateCharged(station, panel.RegionIndex, () => panel.Evaluate(station)).Value;
+                        double acceleration = work.EvaluateCharged(station, in panel).Value;
                         if (forward.ProvidedRange is AccelerationRange range)
                         { ForwardSpeedValidation.CheckObserved(work, panel, range, station, acceleration); }
                         return 2 * acceleration;

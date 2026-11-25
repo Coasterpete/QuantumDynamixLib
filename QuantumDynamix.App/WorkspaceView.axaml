@@ -1,0 +1,367 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:QuantumDynamix.App"
+             x:Class="QuantumDynamix.App.WorkspaceView"
+             Background="Black">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="PanelBorder" Color="#F5F5F5" />
+        <DataTemplate x:Key="ProfileLabel">
+            <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+        </DataTemplate>
+    </UserControl.Resources>
+    <UserControl.Styles>
+        <Style Selector="MenuItem">
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" />
+        </Style>
+        <Style Selector="Button.command, Button.workspace-tab, Button.editor-action">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Button.command">
+            <Setter Property="Foreground" Value="{StaticResource QuantumRed}" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0,3" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.command:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Foreground" Value="#D91B1B" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.command:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Foreground" Value="{StaticResource QuantumRed}" />
+        </Style>
+        <Style Selector="Button.workspace-tab">
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="Button.workspace-tab:disabled /template/ ContentPresenter#PART_ContentPresenter, Button.editor-action:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#A4A4A4" />
+        </Style>
+        <Style Selector="Button.workspace-tab.current">
+            <Setter Property="BorderBrush" Value="White" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <Style Selector="Button.editor-action">
+            <Setter Property="Padding" Value="3,3" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="Button.editor-action.region-action">
+            <Setter Property="Padding" Value="1,3" />
+            <Setter Property="FontSize" Value="8.5" />
+        </Style>
+        <Style Selector="CheckBox.viewport-option">
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Border Width="13" Height="13" Background="#B8B8B8" />
+                        <ContentPresenter Content="{TemplateBinding Content}" Foreground="#A4A4A4" />
+                    </StackPanel>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="CheckBox.profile-visibility">
+            <Setter Property="ContentTemplate" Value="{StaticResource ProfileLabel}" />
+        </Style>
+        <Style Selector="ListBox.compact">
+            <Setter Property="Background" Value="Black" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="ListBox.compact ListBoxItem">
+            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="Padding" Value="4,2" />
+        </Style>
+        <Style Selector="TextBox.key-input">
+            <Setter Property="MinHeight" Value="25" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border BorderBrush="{StaticResource PanelBorder}" BorderThickness="1.5">
+        <Grid RowDefinitions="30,30,1.65*,29,*,27" ColumnDefinitions="18.7*,62.6*,18.7*">
+            <Border Grid.ColumnSpan="3" BorderBrush="{StaticResource PanelBorder}" BorderThickness="0,0,0,2">
+                <Menu Background="Black" FontSize="17">
+                    <MenuItem Header="_File">
+                        <MenuItem x:Name="NewProjectMenu" Header="_New Track…" Click="NewTrack" />
+                        <MenuItem x:Name="OpenProjectMenu" Header="_Open Project…" Click="OpenProject" />
+                        <MenuItem x:Name="SaveProjectMenu" Header="_Save Project" Click="SaveProject" IsEnabled="False" />
+                        <MenuItem x:Name="SaveProjectAsMenu" Header="Save Project _As…" Click="SaveProjectAs" IsEnabled="False" />
+                        <Separator />
+                        <MenuItem x:Name="EmptyWorkspaceMenu" Header="Empty Workspace" Click="ShowEmptyWorkspace" />
+                        <MenuItem x:Name="ActiveTrackMenu" Header="Return to Active Track" Click="ShowActiveTrack" IsEnabled="False" />
+                        <MenuItem x:Name="M3ExampleMenu" Header="Open M3 Example" Click="ShowM3Example" />
+                        <MenuItem x:Name="KeyframeExampleMenu" Header="Open Keyframe Example" Click="ShowKeyframeExample" />
+                        <MenuItem x:Name="ReferenceTrackMenu" Header="Open Quarter-circle Reference Track" Click="ShowReferenceTrack" />
+                        <Separator />
+                        <MenuItem Header="E_xit" Click="Exit" />
+                    </MenuItem>
+                    <MenuItem Header="_Edit">
+                        <MenuItem x:Name="UndoMenu" Header="_Undo" Click="Undo" IsEnabled="False" />
+                        <MenuItem x:Name="RedoMenu" Header="_Redo" Click="Redo" IsEnabled="False" />
+                        <Separator />
+                        <MenuItem x:Name="RegionPropertiesMenu" Header="Region Properties…" Click="EditRegion" IsEnabled="False" />
+                        <MenuItem x:Name="AddChannelMenu" Header="Add Channel…" Click="AddChannel" IsEnabled="False" />
+                    </MenuItem>
+                    <MenuItem x:Name="GraphViewMenu" Header="_View">
+                        <MenuItem Header="Zoom In on Transition Graph" Click="ZoomIn" />
+                        <MenuItem Header="Zoom Out on Transition Graph" Click="ZoomOut" />
+                        <MenuItem Header="Pan Transition Graph Left" Click="PanLeft" />
+                        <MenuItem Header="Pan Transition Graph Right" Click="PanRight" />
+                        <MenuItem Header="Fit Transition Graph" Click="FitGraph" />
+                    </MenuItem>
+                    <MenuItem Header="_Preferences" IsEnabled="False" AutomationProperties.HelpText="Pending implementation" />
+                    <MenuItem Header="_Help" IsEnabled="False" AutomationProperties.HelpText="Pending implementation" />
+                </Menu>
+            </Border>
+
+            <Border Grid.Row="1" Grid.ColumnSpan="3" BorderBrush="{StaticResource PanelBorder}" BorderThickness="0,0,0,2">
+                <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Classes="workspace-tab current" Content="Park Workspace" Click="FocusWorkspace" />
+                        <Button Classes="workspace-tab" Content="Test" IsEnabled="False" AutomationProperties.HelpText="Pending implementation" />
+                        <Button Classes="workspace-tab" Content="Advanced" IsEnabled="False" AutomationProperties.HelpText="Pending implementation" />
+                        <Button Classes="workspace-tab" Content="Scenery Workspace" IsEnabled="False" AutomationProperties.HelpText="Pending implementation" />
+                        <Button Classes="workspace-tab" Content="Terrain Workspace" IsEnabled="False" AutomationProperties.HelpText="Pending implementation" />
+                        <Button Classes="workspace-tab" Content="Scripting Workspace" IsEnabled="False" AutomationProperties.HelpText="Pending implementation" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <Grid Grid.Row="2" RowDefinitions="46*,54*" Margin="8,8,8,9">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="13,5,5,4">
+                        <TextBlock Text="Track Workspace" FontWeight="Bold" FontSize="19" TextWrapping="Wrap"
+                                   Foreground="{StaticResource QuantumRed}" Margin="0,0,0,10" />
+                        <Button x:Name="NewTrackButton" Classes="command" Click="NewTrack"><TextBlock Text="New Track..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Import Track..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Delete Track..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Coaster Properties..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Mirror Track..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Mirror Track..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Operations..." TextWrapping="Wrap" /></Button>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Border Grid.Row="1" Margin="27,3" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" Padding="3">
+                    <Grid RowDefinitions="Auto,*,Auto,Auto">
+                        <TextBlock Text="Region List" HorizontalAlignment="Center" Margin="0,6" FontSize="11" />
+                        <ListBox x:Name="RegionList" Grid.Row="1" Classes="compact" SelectionChanged="SelectRegion"
+                                 AutomationProperties.Name="Region List" />
+                        <TextBlock x:Name="RegionExtent" Grid.Row="2" IsVisible="False" Margin="4,2" FontSize="10"
+                                   TextTrimming="CharacterEllipsis" />
+                        <UniformGrid Grid.Row="3" Columns="2">
+                            <Button x:Name="AppendRegionButton" Classes="editor-action region-action" Click="AppendRegion" IsEnabled="False" HorizontalAlignment="Stretch"><TextBlock Text="Append Region" TextWrapping="Wrap" /></Button>
+                            <Button x:Name="PrependRegionButton" Classes="editor-action region-action" Click="PrependRegion" IsEnabled="False" HorizontalAlignment="Stretch"><TextBlock Text="Prepend Region" TextWrapping="Wrap" /></Button>
+                            <Button Classes="editor-action region-action" IsEnabled="False" HorizontalAlignment="Stretch" AutomationProperties.HelpText="Pending implementation"><TextBlock Text="Mirror Region" TextWrapping="Wrap" /></Button>
+                            <Button x:Name="DeleteRegionButton" Classes="editor-action region-action" Click="DeleteRegion" IsEnabled="False" HorizontalAlignment="Stretch"><TextBlock Text="Delete Region" TextWrapping="Wrap" /></Button>
+                        </UniformGrid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Border Grid.Row="2" Grid.Column="1" BorderBrush="{StaticResource PanelBorder}" BorderThickness="2,0">
+                <Grid RowDefinitions="29,*">
+                    <Border ClipToBounds="True">
+                        <StackPanel Orientation="Horizontal" Margin="10,0" Spacing="7">
+                            <CheckBox Classes="viewport-option" Content="Local" IsEnabled="False" FontSize="11" />
+                            <CheckBox Classes="viewport-option" Content="Snap:" IsEnabled="False" FontSize="11" />
+                            <TextBox Classes="key-input" Width="36" IsEnabled="False" AutomationProperties.Name="Viewport snap distance" />
+                            <TextBlock Text="m" FontSize="11" VerticalAlignment="Center" />
+                            <TextBox Classes="key-input" Width="36" IsEnabled="False" AutomationProperties.Name="Viewport snap angle" />
+                            <TextBlock Text="degrees" FontSize="11" VerticalAlignment="Center" />
+                            <Menu Background="Black" FontSize="11" Height="24" VerticalAlignment="Center">
+                                <MenuItem x:Name="ViewportDisplayMenu" Header="Display" Padding="8,3" IsEnabled="False">
+                                    <MenuItem x:Name="FrontViewMenu" Header="Front" Tag="Front" Click="ChangeTrackView" />
+                                    <MenuItem x:Name="TopViewMenu" Header="Top" Tag="Top" Click="ChangeTrackView" />
+                                    <MenuItem Header="Isometric" Tag="Isometric" Click="ChangeTrackView" />
+                                    <MenuItem Header="Left" Tag="Left" Click="ChangeTrackView" />
+                                    <MenuItem Header="Right" Tag="Right" Click="ChangeTrackView" />
+                                    <MenuItem Header="Back" Tag="Back" Click="ChangeTrackView" />
+                                    <MenuItem Header="Bottom" Tag="Bottom" Click="ChangeTrackView" />
+                                    <MenuItem x:Name="PerspectiveViewMenu" Header="Perspective" Tag="Perspective" Click="ChangeTrackView" />
+                                    <MenuItem Header="Walking / ground-level" IsEnabled="False" />
+                                    <Separator />
+                                    <MenuItem x:Name="FrameTrackMenu" Header="Frame All" Click="FrameTrack" />
+                                </MenuItem>
+                            </Menu>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource PanelBorder}" Height="1.5" VerticalAlignment="Bottom"
+                            IsHitTestVisible="False" />
+                    <Grid Grid.Row="1" ClipToBounds="True">
+                        <local:TrackViewport x:Name="ViewportSurface" Focusable="True"
+                            AutomationProperties.Name="3D viewport"
+                            AutomationProperties.HelpText="Click to select. Right drag to orbit in Perspective. Middle drag or Shift+right drag to pan. Scroll to zoom. Use Display to change views or frame all." />
+                        <TextBlock x:Name="ViewportInfo" VerticalAlignment="Bottom" Margin="9,5" FontSize="11"
+                                   Foreground="#DEDEDE" TextWrapping="Wrap" IsHitTestVisible="False" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="2" Grid.Column="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="12,13,8,8" Spacing="5">
+                    <TextBlock Text="Support Workspace" FontWeight="Bold" FontSize="19" TextWrapping="Wrap"
+                               Foreground="{StaticResource QuantumRed}" Margin="0,0,0,15" />
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Prefab Panel..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False" Margin="-8,0,0,0" FontSize="12"><TextBlock Text="Rail Connector Generator..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Wooden Generator..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Coaster Properties..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Support Settings..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Copy/Define(Autosaves as .qdprefab)..." TextWrapping="Wrap" /></Button>
+                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Paste(Pastes the autosaved .qdprefab)..." TextWrapping="Wrap" /></Button>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Row="3" Grid.ColumnSpan="3" BorderBrush="{StaticResource PanelBorder}" BorderThickness="0,2">
+                <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="9,0">
+                    <Grid Width="1178" ColumnDefinitions="1.05*,.65*,.75*,.65*,.8*,1.6*,1.7*,1.6*,1.6*,1.7*,1.6*">
+                        <TextBlock Grid.Column="0" Text="Position: —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="Roll: —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="Pitch: —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="3" Text="Yaw: —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="4" Text="Speed: —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="5" Text="y-accel(front): —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="6" Text="y-accel(middle): —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="7" Text="y-accel(rear): —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="8" Text="x-accel(front): —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="9" Text="x-accel(middle): —" FontSize="10" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="10" Text="x-accel(rear): —" FontSize="10" HorizontalAlignment="Center" />
+                    </Grid>
+                </Viewbox>
+            </Border>
+
+            <ScrollViewer Grid.Row="4" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="9,10,9,5" Spacing="6">
+                    <TextBlock Text="Transition Editor" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" />
+                    <Grid x:Name="GraphNavigation" ColumnDefinitions="*,*,*,*,*">
+                        <Button Classes="editor-action" Content="−" AutomationProperties.Name="Zoom Out" Click="ZoomOut" />
+                        <Button x:Name="ZoomInButton" Grid.Column="1" Classes="editor-action" Content="+" AutomationProperties.Name="Zoom In" Click="ZoomIn" />
+                        <Button Grid.Column="2" Classes="editor-action" Content="←" AutomationProperties.Name="Pan Left" Click="PanLeft" />
+                        <Button x:Name="PanRightButton" Grid.Column="3" Classes="editor-action" Content="→" AutomationProperties.Name="Pan Right" Click="PanRight" />
+                        <Button x:Name="FitButton" Grid.Column="4" Classes="editor-action" Content="Fit" Click="FitGraph" />
+                    </Grid>
+                    <Grid x:Name="ChannelPanel" ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="False">
+                        <StackPanel>
+                            <TextBlock Text="Show channels" FontSize="10" TextWrapping="Wrap" />
+                            <ItemsControl x:Name="ChannelVisibility" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" x:Name="ActiveChannelPanel" IsVisible="False">
+                            <TextBlock Text="Editable profiles" FontSize="10" TextWrapping="Wrap" />
+                            <ListBox x:Name="ActiveChannel" Classes="compact" SelectionChanged="SelectChannel"
+                                     ItemTemplate="{StaticResource ProfileLabel}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     AutomationProperties.Name="Editable profiles for selected region" />
+                            <Button x:Name="AddChannelButton" Classes="editor-action" Content="Add Channel…" Click="AddChannel" IsVisible="False" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+            <Border Grid.Row="4" Grid.Column="1" BorderBrush="{StaticResource PanelBorder}"
+                    BorderThickness="2,0" ClipToBounds="True">
+                <ContentControl x:Name="TransitionGraphHost"
+                                HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+            </Border>
+
+            <ScrollViewer x:Name="KeyframePanel" Grid.Row="4" Grid.Column="2" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled" IsVisible="False">
+                <StackPanel Margin="9,10,9,5" Spacing="4">
+                    <UniformGrid x:Name="ProfileEditModes" Columns="2" IsVisible="False">
+                        <Button x:Name="TransitionsButton" Classes="editor-action" Content="Transitions" Click="ShowTransitions" />
+                        <Button x:Name="KeyframesButton" Classes="editor-action" Content="Keyframes" Click="ShowKeyframes" />
+                    </UniformGrid>
+                    <StackPanel x:Name="KeyframeFields" Spacing="4">
+                        <TextBlock x:Name="KeyframesHeading" Text="Keyframes" FontWeight="Bold" FontSize="13" />
+                        <ListBox x:Name="KeyframeList" Classes="compact" SelectionChanged="SelectKeyframe" MaxHeight="106"
+                                 AutomationProperties.Name="Keyframe List" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
+                            <StackPanel>
+                                <TextBlock Text="Station (m)" FontSize="11" />
+                                <TextBox x:Name="StationInput" Classes="key-input" AutomationProperties.Name="Keyframe station in metres" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Value" FontSize="11" />
+                                <TextBox x:Name="ValueInput" Classes="key-input" AutomationProperties.Name="Keyframe value" />
+                            </StackPanel>
+                        </Grid>
+                        <UniformGrid Columns="3">
+                            <Button x:Name="AddKeyButton" Classes="editor-action" Content="Add" Click="AddKeyframe" />
+                            <Button x:Name="ApplyKeyButton" Classes="editor-action" Content="Apply" Click="ApplyKeyframe" />
+                            <Button x:Name="DeleteKeyButton" Classes="editor-action" Content="Delete" Click="DeleteKeyframe" />
+                        </UniformGrid>
+                    </StackPanel>
+                    <StackPanel x:Name="TransitionFields" Spacing="4" IsVisible="False">
+                        <ComboBox x:Name="TransitionSpan" HorizontalAlignment="Stretch" FontSize="11"
+                                  AutomationProperties.Name="Transition span" SelectionChanged="SelectTransition" />
+                        <UniformGrid Columns="2">
+                            <Button x:Name="PrependTransitionButton" Classes="editor-action" Content="Prepend" Click="PrependTransition" />
+                            <Button x:Name="AppendTransitionButton" Classes="editor-action" Content="Append" Click="AppendTransition" />
+                        </UniformGrid>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
+                            <StackPanel>
+                                <TextBlock Text="Function" FontSize="11" />
+                                <ComboBox x:Name="TransitionKind" HorizontalAlignment="Stretch" FontSize="11"
+                                          AutomationProperties.Name="Transition function" SelectionChanged="SelectTransitionKind" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Direction" FontSize="11" />
+                                <ComboBox x:Name="TransitionDirection" HorizontalAlignment="Stretch" FontSize="11"
+                                          AutomationProperties.Name="Transition direction" />
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel>
+                            <TextBlock Text="Length (m)" FontSize="11" />
+                            <TextBox x:Name="TransitionLength" Classes="key-input" AutomationProperties.Name="Transition length in metres" />
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
+                            <StackPanel>
+                                <TextBlock Text="Start value" FontSize="11" />
+                                <TextBox x:Name="TransitionStart" Classes="key-input" AutomationProperties.Name="Transition start value" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="End value" FontSize="11" />
+                                <TextBox x:Name="TransitionEnd" Classes="key-input" AutomationProperties.Name="Transition end value" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid x:Name="PlateauFields" ColumnDefinitions="*,*,*" ColumnSpacing="4" IsVisible="False">
+                            <StackPanel>
+                                <TextBlock Text="Hold start" FontSize="10" />
+                                <TextBox x:Name="HoldStart" Classes="key-input" AutomationProperties.Name="Plateau hold start fraction" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Hold end" FontSize="10" />
+                                <TextBox x:Name="HoldEnd" Classes="key-input" AutomationProperties.Name="Plateau hold end fraction" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Hold value" FontSize="10" />
+                                <TextBox x:Name="HoldValue" Classes="key-input" AutomationProperties.Name="Plateau hold value fraction" />
+                            </StackPanel>
+                        </Grid>
+                        <UniformGrid Columns="2">
+                            <Button x:Name="ApplyTransitionButton" Classes="editor-action" Content="Apply" Click="ApplyTransition" />
+                            <Button x:Name="DeleteTransitionButton" Classes="editor-action" Content="Delete" Click="DeleteTransition" />
+                        </UniformGrid>
+                    </StackPanel>
+                    <UniformGrid Columns="2">
+                        <Button x:Name="UndoButton" Classes="editor-action" Content="Undo" Click="Undo" />
+                        <Button x:Name="RedoButton" Classes="editor-action" Content="Redo" Click="Redo" />
+                    </UniformGrid>
+                    <TextBlock x:Name="CalculatedForce" IsVisible="False" FontSize="10" TextWrapping="Wrap" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Row="5" Grid.ColumnSpan="3" BorderBrush="{StaticResource PanelBorder}" BorderThickness="0,2,0,0">
+                <Grid ColumnDefinitions="Auto,*" Margin="9,0" ColumnSpacing="15">
+                    <TextBlock x:Name="ModeLabel" FontSize="11" VerticalAlignment="Center" MaxWidth="320" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="StatusLabel" Grid.Column="1" FontSize="11" Foreground="#C4C4C4"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</UserControl>

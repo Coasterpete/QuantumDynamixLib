@@ -24,6 +24,16 @@ public sealed partial class LongitudinalTrajectory
 
     public LongitudinalAccelerationProfile Profile { get; }
 
+    internal double DistanceSpeedLowerBound => distance!.SpeedLowerBound;
+    internal double DistanceSpeedUpperBound => distance!.SpeedUpperBound;
+    internal double DistanceAccelerationMagnitude => distance!.AccelerationMagnitude;
+    internal bool DistanceMeetsSpeedFloor(double minimumSpeed) => distance!.MeetsSpeedFloor(minimumSpeed);
+
+    internal TimeForwardPanel[] ProveForwardTime(double minimumSpeed, AccelerationRangeProvider? ranges,
+        TrajectoryWork work) => time!.ProveForward(minimumSpeed, ranges, work);
+
+    internal int TimeSubdivisionDepth => time!.Settings.MaximumDepth;
+
     /// <summary>Returns motion at the requested authoring second or heartline metre, according to the profile domain.</summary>
     public LongitudinalMotionSample Sample(double coordinate, EvaluationSide side = EvaluationSide.Automatic)
     {
@@ -113,6 +123,10 @@ public sealed partial class LongitudinalTrajectory
             int lower = ~index - 1;
             return Advance(panels[lower], coordinate, prefixes[lower], work);
         }
+
+        internal TimeForwardPanel[] ProveForward(double minimumSpeed, AccelerationRangeProvider? ranges,
+            TrajectoryWork work) => ForwardSpeedValidation.ValidateTime(panels, prefixes[0].Velocity.Value,
+                minimumSpeed, ranges, work);
 
         private TimePrefix Advance(TrajectoryPanel panel, double end, TimePrefix prefix, TrajectoryWork work)
         {

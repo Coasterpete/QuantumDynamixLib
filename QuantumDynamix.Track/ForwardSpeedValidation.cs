@@ -1,38 +1,80 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using QuantumDynamix.Math.Functions;
 
 namespace QuantumDynamix.Track;
 
 internal readonly record struct ForwardPanel(TrajectoryPanel Panel, double SquaredSpeedLower, double SquaredSpeedUpper,
-    AccelerationRange? ProvidedRange);
+    AccelerationRange Range, bool IsProvided)
+{
+    internal AccelerationRange? ProvidedRange => IsProvided ? Range : null;
+}
 
-/// <summary>Establishes positive squared speed from analytic or caller-supplied acceleration enclosures.</summary>
+internal readonly record struct TimeForwardPanel(TrajectoryPanel Panel, double SpeedLower, double SpeedUpper,
+    AccelerationRange Range, bool IsProvided);
+
+/// <summary>Establishes positive speed from analytic or caller-supplied acceleration enclosures.</summary>
 internal static class ForwardSpeedValidation
 {
     internal static ForwardPanel[] Validate(TrajectoryPanel[] panels, double initialSpeed, AccelerationRangeProvider? customRanges,
-        TrajectoryWork work)
+        TrajectoryWork work, out BigInteger minimumSquaredSpeed)
     {
         BigInteger initial = DoubleUnits(initialSpeed);
         BigInteger initialSquaredSpeed = initial * initial;
+        var (cells, ranges) = EstablishEnclosures(panels, initialSquaredSpeed, BigInteger.One,
+            distance: true, customRanges, work);
+        minimumSquaredSpeed = ranges.Min(range => range.Lower);
+        return ToForwardPanels(cells, ranges, work);
+    }
+
+    internal static bool MeetsSquaredSpeedFloor(BigInteger minimumSquaredSpeed, double minimumSpeed)
+    {
+        // Compare in the exact units used for the propagated squared-speed enclosure.
+        BigInteger speed = DoubleUnits(minimumSpeed);
+        return minimumSquaredSpeed >= speed * speed;
+    }
+
+    internal static TimeForwardPanel[] ValidateTime(TrajectoryPanel[] panels, double initialSpeed, double minimumSpeed,
+        AccelerationRangeProvider? customRanges, TrajectoryWork work)
+    {
+        BigInteger initial = DoubleUnits(initialSpeed) << 1074;
+        BigInteger floor = DoubleUnits(minimumSpeed) << 1074;
+        var (cells, ranges) = EstablishEnclosures(panels, initial, floor, distance: false, customRanges, work);
+        var result = new TimeForwardPanel[cells.Count];
+        for (int i = 0; i < result.Length; i++)
+        {
+            var enclosure = ToEnclosure(ranges[i].Lower, ranges[i].Upper);
+            Cell cell = cells[i];
+            if (enclosure is not { Lower: > 0 })
+            { throw work.Failure(TrajectoryFailureCode.NumericalRangeExceeded, cell.Panel, "The velocity enclosure exceeds usable double range."); }
+            result[i] = new(cell.Panel, enclosure.Value.Lower, enclosure.Value.Upper, cell.Range, cell.IsProvided);
+        }
+        return result;
+    }
+
+    private static (List<Cell>, PropagatedRange[]) EstablishEnclosures(TrajectoryPanel[] panels, BigInteger initial,
+        BigInteger floor, bool distance, AccelerationRangeProvider? customRanges, TrajectoryWork work)
+    {
         var cells = new List<Cell>(panels.Length);
         foreach (TrajectoryPanel panel in panels) { cells.Add(CreateCell(panel, 0, customRanges, work)); }
 
         while (true)
         {
-            PropagatedRange[] ranges = Propagate(cells, initialSquaredSpeed, work, out int firstInconclusive);
-            if (firstInconclusive < 0) { return ToForwardPanels(cells, ranges, work); }
+            PropagatedRange[] ranges = Propagate(cells, initial, floor, distance, work, out int firstInconclusive);
+            if (firstInconclusive < 0) { return (cells, ranges); }
 
-            int lastInconclusive = Array.FindLastIndex(ranges, range => range.Lower.Sign <= 0);
+            int lastInconclusive = Array.FindLastIndex(ranges, range => range.Lower < floor);
             List<Cell> refined = Refine(cells, lastInconclusive, customRanges, work);
             if (refined.Count == cells.Count)
             {
                 TrajectoryPanel panel = cells[firstInconclusive].Panel;
                 PropagatedRange range = ranges[firstInconclusive];
                 throw work.Failure(TrajectoryFailureCode.SpeedPositivityUnresolved, panel,
-                    "The acceleration enclosures could not establish strictly positive squared speed over this interval.",
-                    enclosure: ToEnclosure(range.Lower, range.Upper));
+                    distance ? "The acceleration enclosures could not establish strictly positive squared speed over this interval."
+                        : "The acceleration enclosures could not establish the required forward velocity over this interval.",
+                    enclosure: distance ? ToEnclosure(range.Lower, range.Upper) : null);
             }
             cells = refined;
         }
@@ -91,12 +133,12 @@ internal static class ForwardSpeedValidation
         && double.IsFinite(range.UpperMetresPerSecondSquared)
         && range.LowerMetresPerSecondSquared <= range.UpperMetresPerSecondSquared;
 
-    private static PropagatedRange[] Propagate(List<Cell> cells, BigInteger initialSquaredSpeed, TrajectoryWork work,
-        out int firstInconclusive)
+    private static PropagatedRange[] Propagate(List<Cell> cells, BigInteger initial, BigInteger floor,
+        bool distance, TrajectoryWork work, out int firstInconclusive)
     {
         var ranges = new PropagatedRange[cells.Count];
-        BigInteger lower = initialSquaredSpeed;
-        BigInteger upper = initialSquaredSpeed;
+        BigInteger lower = initial;
+        BigInteger upper = initial;
         firstInconclusive = -1;
         for (int i = 0; i < cells.Count; i++)
         {
@@ -105,17 +147,20 @@ internal static class ForwardSpeedValidation
             if (cell.Visited) { work.Charge(panel.Start, panel.End, panel.RegionIndex, checkingPositivity: true); }
             cells[i] = cell with { Visited = true };
             // Each double is an integer multiple of 2^-1074. Products and prefix sums below are exact in 2^-2148 units.
-            BigInteger twiceWidth = (DoubleUnits(panel.End) - DoubleUnits(panel.Start)) << 1;
-            BigInteger endLower = lower + twiceWidth * DoubleUnits(cell.Range.LowerMetresPerSecondSquared);
-            BigInteger endUpper = upper + twiceWidth * DoubleUnits(cell.Range.UpperMetresPerSecondSquared);
+            BigInteger width = DoubleUnits(panel.End) - DoubleUnits(panel.Start);
+            if (distance) { width <<= 1; }
+            BigInteger endLower = lower + width * DoubleUnits(cell.Range.LowerMetresPerSecondSquared);
+            BigInteger endUpper = upper + width * DoubleUnits(cell.Range.UpperMetresPerSecondSquared);
             if (endUpper.Sign <= 0)
             {
                 throw work.Failure(TrajectoryFailureCode.NonPositiveSpeed, panel.End, panel.End, panel.RegionIndex,
-                    "The enclosed squared speed is nonpositive at this station.", enclosure: ToEnclosure(endLower, endUpper));
+                    distance ? "The enclosed squared speed is nonpositive at this station."
+                        : "The enclosed velocity is nonpositive at this authoring time.",
+                    enclosure: distance ? ToEnclosure(endLower, endUpper) : null);
             }
             BigInteger throughoutLower = BigInteger.Min(lower, endLower);
             ranges[i] = new(throughoutLower, BigInteger.Max(upper, endUpper));
-            if (firstInconclusive < 0 && throughoutLower.Sign <= 0) { firstInconclusive = i; }
+            if (firstInconclusive < 0 && throughoutLower < floor) { firstInconclusive = i; }
             lower = endLower;
             upper = endUpper;
         }
@@ -153,7 +198,7 @@ internal static class ForwardSpeedValidation
             var enclosure = ToEnclosure(ranges[i].Lower, ranges[i].Upper);
             if (enclosure is not { Lower: > 0 })
             { throw work.Failure(TrajectoryFailureCode.NumericalRangeExceeded, cell.Panel, "The positive squared-speed enclosure exceeds usable double range.", enclosure: enclosure); }
-            result[i] = new(cell.Panel, enclosure.Value.Lower, enclosure.Value.Upper, cell.IsProvided ? cell.Range : null);
+            result[i] = new(cell.Panel, enclosure.Value.Lower, enclosure.Value.Upper, cell.Range, cell.IsProvided);
         }
         return result;
     }

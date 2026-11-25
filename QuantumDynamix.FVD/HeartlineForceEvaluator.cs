@@ -3,6 +3,7 @@ using QuantumDynamix.Geometry;
 using QuantumDynamix.Math;
 using QuantumDynamix.Math.Functions;
 using QuantumDynamix.Math.Timelines;
+using QuantumDynamix.Splines.Curves;
 using QuantumDynamix.Track;
 
 namespace QuantumDynamix.FVD;
@@ -23,6 +24,15 @@ public readonly record struct HeartlineForceSample(
 /// <summary>Evaluates the acceleration and specific force required for prescribed motion along a heartline.</summary>
 public static class HeartlineForceEvaluator
 {
+    internal const double StandardGravity = 9.80665;
+
+    internal static Vector3d ProjectSpecificForce(CurveFrame frame, Vector3d worldAcceleration, Vector3d worldGravity)
+    {
+        Vector3d specificForce = worldAcceleration - worldGravity;
+        return new(Vector3d.Dot(specificForce, frame.Forward), Vector3d.Dot(specificForce, frame.Left),
+            Vector3d.Dot(specificForce, frame.Up));
+    }
+
     /// <summary>Samples an ideal point following the authored heartline.</summary>
     /// <param name="track">Track supplying the heartline and its banked orientation.</param>
     /// <param name="heartlineSpeed">Continuous distance timeline of speed in m/s over the entire heartline.</param>
@@ -84,7 +94,15 @@ public static class HeartlineForceEvaluator
     /// <param name="worldGravity">Finite world gravitational acceleration in m/s².</param>
     /// <param name="geometrySide">The geometry limit, independent of the acceleration side. Endpoints use inward limits.</param>
     public static HeartlineForceSample Evaluate(HeartlineTrack track, LongitudinalMotionSample motion,
-        Vector3d worldGravity, EvaluationSide geometrySide)
+        Vector3d worldGravity, EvaluationSide geometrySide) => EvaluateMotion(track, motion, worldGravity, geometrySide);
+
+    // Verification supplies the source used to construct this track's fitted banking function.
+    internal static HeartlineForceSample EvaluateFitted(HeartlineTrack track, ReconstructedHeartline source,
+        LongitudinalMotionSample motion, EvaluationSide geometrySide) =>
+        EvaluateMotion(track, motion, Vector3d.Zero, geometrySide, source);
+
+    private static HeartlineForceSample EvaluateMotion(HeartlineTrack track, LongitudinalMotionSample motion,
+        Vector3d worldGravity, EvaluationSide geometrySide, ReconstructedHeartline? fittedSource = null)
     {
         ArgumentNullException.ThrowIfNull(track);
         if (!Enum.IsDefined(geometrySide)) { throw new ArgumentOutOfRangeException(nameof(geometrySide)); }
@@ -96,7 +114,8 @@ public static class HeartlineForceEvaluator
         Check.Finite(motion.HeartlineVelocityMetresPerSecond, nameof(motion));
         Check.Finite(motion.LongitudinalAccelerationMetresPerSecondSquared, nameof(motion));
         return Project(track, station, System.Math.Abs(motion.HeartlineVelocityMetresPerSecond),
-            motion.LongitudinalAccelerationMetresPerSecondSquared, worldGravity, GeometryLimit(station, length, geometrySide));
+            motion.LongitudinalAccelerationMetresPerSecondSquared, worldGravity, GeometryLimit(station, length, geometrySide),
+            fittedSource);
     }
 
     private static EvaluationSide GeometryLimit(double station, double length, EvaluationSide side) => station switch
@@ -107,20 +126,18 @@ public static class HeartlineForceEvaluator
     };
 
     private static HeartlineForceSample Project(HeartlineTrack track, double heartlineStation, double speed,
-        double tangentialAcceleration, Vector3d worldGravity, EvaluationSide limit)
+        double tangentialAcceleration, Vector3d worldGravity, EvaluationSide limit, ReconstructedHeartline? fittedSource = null)
     {
         double parameter = track.HeartlineStations.Invert(heartlineStation).Parameter;
-        CurveGeometrySample geometry = CurveGeometry.Evaluate(track.Heartline, parameter, limit);
+        CurveJet3d jet = track.Heartline.Evaluate(parameter, limit);
+        CurveGeometrySample geometry = CurveGeometry.Evaluate(jet);
         Vector3d worldAcceleration = geometry.Tangent * tangentialAcceleration + geometry.CurvatureVector * speed * speed;
 
-        double bankAngle = track.Banking.Evaluate(heartlineStation, limit).Value;
+        double bankAngle = fittedSource is null
+            ? track.Banking.Evaluate(heartlineStation, limit).Value
+            : HeartlineFitMapping.BankAtParameter(fittedSource, track.Heartline, parameter, limit, jet).Value;
         CurveFrame bankedFrame = track.Frames.Evaluate(parameter).Banked(bankAngle);
-        Vector3d worldSpecificForce = worldAcceleration - worldGravity;
-        Vector3d trackSpecificForce = new(
-            Vector3d.Dot(worldSpecificForce, bankedFrame.Forward),
-            Vector3d.Dot(worldSpecificForce, bankedFrame.Left),
-            Vector3d.Dot(worldSpecificForce, bankedFrame.Up));
-
-        return new(heartlineStation, speed, bankedFrame, worldAcceleration, trackSpecificForce);
+        return new(heartlineStation, speed, bankedFrame, worldAcceleration,
+            ProjectSpecificForce(bankedFrame, worldAcceleration, worldGravity));
     }
 }

@@ -1,0 +1,58 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="QuantumDynamix.App.MainWindow"
+        Title="QUANTUM DYNAMIX"
+        Icon="/Assets/QuantumLogoQX.png"
+        Width="1200" Height="900"
+        MinWidth="820" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        Background="Black"
+        Foreground="White"
+        FontFamily="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace">
+    <Window.Styles>
+        <Style Selector="Button.welcome-action">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource QuantumRed}" />
+            <Setter Property="FontSize" Value="36" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Height" Value="46" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.welcome-action /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="TextElement.LetterSpacing" Value="2" />
+        </Style>
+        <Style Selector="Button.welcome-action:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Foreground" Value="#BC1818" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.welcome-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#201010" />
+            <Setter Property="Foreground" Value="#FF6666" />
+        </Style>
+    </Window.Styles>
+
+    <Viewbox Stretch="Uniform" VerticalAlignment="Top">
+        <Canvas Width="1200" Height="675">
+            <Image x:Name="WelcomeArtwork"
+                   Width="1200" Height="410" Source="/Assets/WelcomeArtwork.png"
+                   AutomationProperties.Name="QUANTUM DYNAMIX Roller Coaster Engine"
+                   RenderOptions.BitmapInterpolationMode="HighQuality" />
+            <Button x:Name="LibraryButton" Classes="welcome-action" Content="LIBRARY" IsEnabled="False"
+                    Canvas.Left="84" Canvas.Top="418" Width="184" AutomationProperties.HelpText="Pending implementation" />
+            <Button x:Name="OpenEditorButton" Classes="welcome-action" Content="EDITOR" IsDefault="True" Click="OpenEditor"
+                    Canvas.Left="283" Canvas.Top="418" Width="160" />
+            <Button x:Name="SetupButton" Classes="welcome-action" Content="SETUP" IsEnabled="False"
+                    Canvas.Left="463" Canvas.Top="418" Width="132" AutomationProperties.HelpText="Pending implementation" />
+            <Button x:Name="InfoButton" Classes="welcome-action" Content="INFO" IsEnabled="False"
+                    Canvas.Left="616" Canvas.Top="418" Width="112" AutomationProperties.HelpText="Pending implementation" />
+            <Button x:Name="NewsButton" Classes="welcome-action" Content="NEWS" IsEnabled="False"
+                    Canvas.Left="749" Canvas.Top="418" Width="112" AutomationProperties.HelpText="Pending implementation" />
+            <Button x:Name="ExitButton" Classes="welcome-action" Content="EXIT" Click="Exit"
+                    Canvas.Left="889" Canvas.Top="418" Width="112" />
+            <TextBlock Canvas.Top="485" Width="1085" TextAlignment="Center" FontSize="13"
+                       Foreground="#B8B8B8" Text="Dimmed destinations are pending" />
+        </Canvas>
+    </Viewbox>
+</Window>

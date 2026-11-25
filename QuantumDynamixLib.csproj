@@ -9,6 +9,7 @@
   <!-- One assembly; explicitly include the existing subsystem directories.
        Tests, tools, and generated files must never become library sources. -->
   <ItemGroup>
+    <InternalsVisibleTo Include="QuantumDynamix.App" />
     <Compile Include="QuantumDynamix.Math/**/*.cs;
                       QuantumDynamix.Units/**/*.cs;
                       QuantumDynamix.Splines/**/*.cs;

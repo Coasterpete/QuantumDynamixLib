@@ -53,8 +53,17 @@ public sealed class RotationMinimizingFrames
         CurveFrame initial = new(start.Position, tangent, Vector3d.Cross(up, tangent).Normalized(), up);
         var output = new List<FrameNode> { new(curve.Minimum, initial) };
         double error = 0;
-        double[] seeds = Enumerable.Range(0, 65).Select(i => i == 64 ? curve.Maximum : curve.Minimum + (curve.Maximum - curve.Minimum) * i / 64)
-            .Concat(curve.Definition.Breakpoints).Distinct().Order().ToArray();
+        var seeds = new SortedSet<double>(curve.Definition.Breakpoints) { curve.Minimum, curve.Maximum };
+        for (int i = 1; i < 64; i++)
+        {
+            double parameter = curve.Minimum + (curve.Maximum - curve.Minimum) * i / 64;
+            // Leave room for the adaptive midpoint on each side of an optional seed.
+            // Mandatory boundaries are inserted first and are always retained.
+            if (parameter > curve.Minimum && parameter < curve.Maximum
+                && !seeds.Contains(System.Math.BitDecrement(parameter))
+                && !seeds.Contains(System.Math.BitIncrement(parameter)))
+            { seeds.Add(parameter); }
+        }
         foreach (double endpoint in seeds.Skip(1)) { Advance(output[^1].Parameter, output[^1].Frame, endpoint, 0, output, ref error); }
         nodes = output.ToArray();
         Nodes = Array.AsReadOnly(nodes);
@@ -76,24 +85,56 @@ public sealed class RotationMinimizingFrames
             if (nodes[middle].Parameter <= parameter) { low = middle; } else { high = middle; }
         }
         if (nodes[low].Parameter == parameter) { return nodes[low].Frame; }
+        if (System.Math.BitIncrement(nodes[low].Parameter) == parameter)
+        { return EvaluateAdjacent(parameter, nodes[low]); }
+        if (high < nodes.Length && System.Math.BitIncrement(parameter) == nodes[high].Parameter)
+        { return EvaluateAdjacent(parameter, nodes[high]); }
         var output = new List<FrameNode>();
         double error = 0;
         Advance(nodes[low].Parameter, nodes[low].Frame, parameter, 0, output, ref error);
         return output[^1].Frame;
     }
 
+    private CurveFrame EvaluateAdjacent(double parameter, FrameNode node)
+    {
+        CurveFrame reference = node.Frame;
+        CurveJet3d jet = Curve.Evaluate(parameter, EvaluationSide.Right);
+        Vector3d tangent = jet.FirstDerivative.Normalized();
+        Vector3d bisector = reference.Forward + tangent;
+        if (bisector == Vector3d.Zero)
+        {
+            double a = System.Math.Min(parameter, node.Parameter);
+            double b = System.Math.Max(parameter, node.Parameter);
+            throw new NumericalConvergenceException(FormattableString.Invariant(
+                $"Frame transport for an adjacent query over spline parameters [{a:R}, {b:R}] found opposite tangents ({System.Math.PI:R} rad apart)."),
+                0, System.Math.PI) { ParameterInterval = (a, b) };
+        }
+
+        // On the normal plane, the shortest tangent rotation agrees with reflection in the plane
+        // perpendicular to the tangent bisector. This avoids relying on a possibly rounded-to-zero chord.
+        Vector3d normal = bisector.Normalized();
+        Vector3d transported = reference.Up - normal * (2 * Vector3d.Dot(normal, reference.Up));
+        Vector3d up = (transported - tangent * Vector3d.Dot(tangent, transported)).Normalized();
+        return new(jet.Position, tangent, Vector3d.Cross(up, tangent).Normalized(), up);
+    }
+
     private void Advance(double a, CurveFrame start, double b, int depth, List<FrameNode> output, ref double error)
     {
         double middle = a + (b - a) / 2;
-        if (!(middle > a && middle < b)) { throw new NumericalConvergenceException("Frame parameter subdivision cannot be resolved.", depth, b - a); }
+        if (!(middle > a && middle < b))
+        {
+            throw new NumericalConvergenceException(FormattableString.Invariant(
+                $"Frame transport cannot resolve a midpoint over spline parameters [{a:R}, {b:R}] at subdivision depth {depth}. The interval width is {b - a:R} in spline parameter units."),
+                depth, b - a) { ParameterInterval = (a, b) };
+        }
         CurveJet3d midpoint = Curve.Evaluate(middle, EvaluationSide.Right);
         CurveJet3d endpoint = Curve.Evaluate(b, EvaluationSide.Left);
-        CurveFrame half = Transport(start, midpoint.Position, midpoint.FirstDerivative.Normalized());
-        CurveFrame fine = Transport(half, endpoint.Position, endpoint.FirstDerivative.Normalized());
+        CurveFrame half = Transport(start, midpoint, a, middle, depth);
+        CurveFrame fine = Transport(half, endpoint, middle, b, depth);
         double estimate;
         Vector3d chord = endpoint.Position - start.Position;
         if (chord.Length == 0) { estimate = double.PositiveInfinity; }
-        else { estimate = Angle(Transport(start, endpoint.Position, endpoint.FirstDerivative.Normalized()).Up, fine.Up); }
+        else { estimate = Angle(Transport(start, endpoint, a, b, depth).Up, fine.Up); }
         double budget = angularTolerance * ((b - a) / (Curve.Maximum - Curve.Minimum));
         if (estimate <= budget)
         {
@@ -102,14 +143,39 @@ public sealed class RotationMinimizingFrames
             error += estimate;
             return;
         }
-        if (depth >= maximumDepth) { throw new NumericalConvergenceException("Frame angular error estimate exceeds its budget (radians).", depth, estimate); }
+        if (depth >= maximumDepth)
+        {
+            bool hasEstimate = double.IsFinite(estimate);
+            string detail = hasEstimate
+                ? FormattableString.Invariant($"The angular error estimate is {estimate:R} rad against a limit of {budget:R} rad.")
+                : "The end-to-end chord rounded to zero, leaving the angular error estimate unavailable.";
+            throw new NumericalConvergenceException(FormattableString.Invariant(
+                $"Frame transport exhausted the angular error budget over spline parameters [{a:R}, {b:R}] at subdivision depth {depth}. {detail}"),
+                depth, estimate)
+            {
+                ParameterInterval = (a, b),
+                ResidualBudget = hasEstimate ? ("Frame angular error estimate", "rad", budget) : null
+            };
+        }
         Advance(a, start, middle, depth + 1, output, ref error);
         Advance(middle, output[^1].Frame, b, depth + 1, output, ref error);
     }
 
-    private static CurveFrame Transport(CurveFrame start, Vector3d position, Vector3d tangent)
+    private static CurveFrame Transport(CurveFrame start, CurveJet3d endpoint, double a, double b, int depth)
     {
-        Vector3d chord = (position - start.Position).Normalized();
+        if (endpoint.FirstDerivative == Vector3d.Zero)
+        {
+            throw new InvalidOperationException(FormattableString.Invariant(
+                $"Frame transport over spline parameters [{a:R}, {b:R}] at subdivision depth {depth} reached a zero tangent at {b:R}."));
+        }
+        Vector3d tangent = endpoint.FirstDerivative.Normalized();
+        Vector3d displacement = endpoint.Position - start.Position;
+        if (displacement == Vector3d.Zero)
+        {
+            throw new InvalidOperationException(FormattableString.Invariant(
+                $"Frame transport encountered a zero displacement over spline parameters [{a:R}, {b:R}] at subdivision depth {depth}."));
+        }
+        Vector3d chord = displacement.Normalized();
         Vector3d reflectedUp = start.Up - chord * (2 * Vector3d.Dot(chord, start.Up));
         Vector3d reflectedTangent = start.Forward - chord * (2 * Vector3d.Dot(chord, start.Forward));
         Vector3d difference = tangent - reflectedTangent;
@@ -120,7 +186,7 @@ public sealed class RotationMinimizingFrames
             transported -= normal * (2 * Vector3d.Dot(normal, reflectedUp));
         }
         Vector3d up = (transported - tangent * Vector3d.Dot(tangent, transported)).Normalized();
-        return new(position, tangent, Vector3d.Cross(up, tangent).Normalized(), up);
+        return new(endpoint.Position, tangent, Vector3d.Cross(up, tangent).Normalized(), up);
     }
 
     private static double Angle(Vector3d a, Vector3d b) => System.Math.Atan2(Vector3d.Cross(a, b).Length, Vector3d.Dot(a, b));
