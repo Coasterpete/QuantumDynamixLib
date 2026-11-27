@@ -37,9 +37,11 @@ internal sealed partial class WorkspaceView : UserControl
     public WorkspaceView()
     {
         InitializeComponent();
+        previewWorker = new(ApplyLivePreview);
         InitializeTransitionControls();
         ViewportSurface.StateChanged += UpdateViewportInfo;
         ViewportSurface.RegionPicked += id => SelectRegionInList(IndexOfRegion(id));
+        ViewportSurface.SegmentPicked += SelectSegmentById;
         KeyModifiers modifier = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
         NewProjectMenu.InputGesture = NewProjectMenu.HotKey = new(Key.N, modifier);
         OpenProjectMenu.InputGesture = OpenProjectMenu.HotKey = new(Key.O, modifier);
@@ -52,24 +54,33 @@ internal sealed partial class WorkspaceView : UserControl
 
     private void Open(WorkspaceMode next)
     {
+        EndLivePreview(restoreFields: false);
         mode = next;
-        editingTransitions = false;
+        inspector = InspectorMode.Keyframes;
         if (mode == WorkspaceMode.KeyframeExample)
         {
             example ??= KeyframeExample.Create();
         }
 
         graph = new(mode == WorkspaceMode.M3Example ? TransitionGraphFixture.CreateRegions() : []);
+        AutomationProperties.SetName(graph, "Transition Editor graph");
+        AutomationProperties.SetHelpText(graph, "Click a curve to select its Transition. Drag keyframes to edit them. " +
+            "Drag a Region's end boundary to change its length. Drag empty space, middle drag, or right drag to pan. " +
+            "Scroll to zoom. Press Escape to cancel a drag.");
         graph.EditProposed += CompleteDrag;
         graph.PreviewChanged += PreviewDrag;
         graph.KeyframeSelected += index =>
         {
-            if (editingTransitions) { SetTransitionMode(false); }
+            if (inspector != InspectorMode.Keyframes) { SetInspectorMode(InspectorMode.Keyframes); }
             KeyframeList.SelectedIndex = index;
         };
-        if (IsTrack) { graph.TransitionSelected += SelectTransitionOnGraph; }
+        graph.CurveSelected += SelectCurveOnGraph;
+        graph.BoundarySelected += SelectBoundaryOnGraph;
         graph.RegionSelected += SelectRegionInList;
-        graph.InvalidDrag += () => StatusLabel.Text = "Keep the station strictly between its neighboring keyframes.";
+        graph.InvalidDrag += ReportInvalidDrag;
+        graph.KeyframePolicy = index => Session is { } session && SelectedRegion >= 0 && EditingChannel is { } channel
+            ? session.KeyframeEditMode(SelectedRegion, channel, index) : KeyframeDragMode.None;
+        graph.BoundaryPolicy = IsTrack ? ResolveBoundaryDrag : null;
         TransitionGraphHost.Content = graph;
 
         ModeLabel.Text = mode switch
@@ -125,6 +136,7 @@ internal sealed partial class WorkspaceView : UserControl
         ChannelVisibility.ItemsSource = graph.Channels.Select(CreateChannelToggle).ToArray();
         AppendRegionButton.IsEnabled = IsTrack;
         PrependRegionButton.IsEnabled = IsTrack && items.Length != 0 && graph.Regions[0].Start > 0;
+        RefreshNewRegionControls();
         updatingControls = false;
         RefreshChannels(channel);
     }
@@ -192,6 +204,7 @@ internal sealed partial class WorkspaceView : UserControl
         RegionExtent.IsVisible = selected >= 0;
         updatingControls = false;
         RefreshKeyframes(-1);
+        RefreshRegionFields();
         ViewportSurface.SetActiveRegion(DisplayedTrack is null ? null : region?.Id);
 
         if (selected >= 0 && (graph.Regions[selected].End <= graph.Viewport.Start ||
@@ -229,15 +242,14 @@ internal sealed partial class WorkspaceView : UserControl
 
         updatingControls = true;
         KeyframeList.ItemsSource = keys.Select((key, index) =>
-            $"{key.Coordinate:G6} m   {key.Value:G6}{(index == 0 || index == keys.Count - 1 ? "  fixed" : "")}").ToArray();
+            $"{key.Coordinate:G6} m   {key.Value:G6}{DescribeKeyframeLimit(channel!, index)}").ToArray();
         KeyframeList.SelectedIndex = selection;
         updatingControls = false;
         RefreshEditMode();
         UpdateKeyframeSelection();
         RefreshTransitions(transition);
         StationInput.IsEnabled = ValueInput.IsEnabled = AddKeyButton.IsEnabled = channel is not null;
-        UndoMenu.IsEnabled = UndoButton.IsEnabled = Session?.CanUndo == true;
-        RedoMenu.IsEnabled = RedoButton.IsEnabled = Session?.CanRedo == true;
+        RefreshHistoryControls();
         if (IsTrack)
         {
             trackRegion = SelectedRegion >= 0 ? Session!.Regions[SelectedRegion].Id : null;
@@ -254,13 +266,30 @@ internal sealed partial class WorkspaceView : UserControl
         }
     }
 
+    private string DescribeKeyframeLimit(string channel, int index) => Session!.KeyframeEditMode(SelectedRegion, channel, index) switch
+    {
+        KeyframeDragMode.Free => "",
+        KeyframeDragMode.ValueOnly => "  boundary",
+        _ => Session.SupportsForceRegions ? "  linked" : "  fixed"
+    };
+
     private void UpdateKeyframeSelection()
     {
         string? channel = EditingChannel;
         var keys = channel is null ? [] : Session!.Keys(SelectedRegion, channel);
         int index = KeyframeList.SelectedIndex;
         graph.SetSelection(SelectedRegion, channel, keys, index);
-        ApplyKeyButton.IsEnabled = DeleteKeyButton.IsEnabled = index > 0 && index < keys.Count - 1;
+        ApplyKeyButton.IsEnabled = channel is not null &&
+            Session!.KeyframeEditMode(SelectedRegion, channel, index) != KeyframeDragMode.None;
+        DeleteKeyButton.IsEnabled = index > 0 && index < keys.Count - 1;
+        string? limit = channel is not null && index >= 0
+            ? Session!.KeyframeEditMode(SelectedRegion, channel, index) switch
+            {
+                KeyframeDragMode.ValueOnly => "This keyframe is on a Region boundary. Its value can change; drag the boundary to change its station.",
+                KeyframeDragMode.None => "This keyframe is linked to the adjoining Region boundary.",
+                _ => null
+            } : null;
+        ToolTip.SetTip(ApplyKeyButton, limit);
         StationInput.Text = index >= 0 ? Format(keys[index].Coordinate) : "";
         ValueInput.Text = index >= 0 ? Format(keys[index].Value) : "";
         if (!TransitionFields.IsVisible) { RefreshCalculatedForce(index >= 0 ? keys[index].Coordinate : null); }
@@ -309,9 +338,9 @@ internal sealed partial class WorkspaceView : UserControl
         return true;
     }
 
-    private static string Format(double value) => value.ToString("R", CultureInfo.CurrentCulture);
+    internal static string Format(double value) => value.ToString("R", CultureInfo.CurrentCulture);
 
-    private static bool TryReadNumber(string? text, out double value) =>
+    internal static bool TryReadNumber(string? text, out double value) =>
         double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value) && double.IsFinite(value);
 
     private void AddKeyframe(object? sender, RoutedEventArgs e)
@@ -342,39 +371,6 @@ internal sealed partial class WorkspaceView : UserControl
         }
     }
 
-    private void CompleteDrag(TransitionEdit edit)
-    {
-        if (edit is not TransitionEdit.Keyframe key || EditingChannel != key.Channel || key.Original == key.Proposed)
-        {
-            return;
-        }
-
-        int index = KeyframeList.SelectedIndex;
-        if (index >= 0 && Session!.Keys(SelectedRegion, key.Channel)[index] == key.Original)
-        {
-            string? error = Session.Move(SelectedRegion, key.Channel, index, key.Proposed);
-            FinishKeyEdit(error, index, $"Moved the {key.Channel} keyframe.");
-        }
-    }
-
-    private void PreviewDrag(TransitionEdit? edit)
-    {
-        var viewport = graph.Viewport;
-        int index = SelectedRegion;
-        if (edit is TransitionEdit.Keyframe key && EditingChannel == key.Channel &&
-            key.Proposed.Value >= viewport.MinimumValue && key.Proposed.Value <= viewport.MaximumValue &&
-            Session!.PreviewMove(index, key.Channel, KeyframeList.SelectedIndex, key.Proposed) is { } preview)
-        {
-            Region[] visible = graph.Regions.ToArray();
-            visible[index] = preview;
-            graph.SetRegionPreview(visible);
-        }
-        else
-        {
-            graph.SetRegionPreview(null);
-        }
-    }
-
     private void FinishKeyEdit(string? error, int selection, string success)
     {
         if (error is null)
@@ -399,6 +395,13 @@ internal sealed partial class WorkspaceView : UserControl
     {
         if (Session is not { } session)
         {
+            return;
+        }
+        if (graph.IsDragging)
+        {
+            // Undo or Redo during a drag only discards the uncommitted drag.
+            graph.CancelDrag();
+            StatusLabel.Text = "Cancelled the drag. The committed track is unchanged.";
             return;
         }
         int index = SelectedRegion;
@@ -443,6 +446,11 @@ internal sealed partial class WorkspaceView : UserControl
         projectPath = path;
         trackRegion = null;
         trackChannel = null;
+        NewRegionLength.Text = "";
+        FirstStationInput.Text = "0";
+        NewRegionMode.SelectedIndex = 0;
+        operationsOpen = false;
+        activeSegment = null;
         Open(WorkspaceMode.Track);
     }
 
@@ -452,6 +460,7 @@ internal sealed partial class WorkspaceView : UserControl
         var scene = document?.SampleWireframe(RegionTrackGeometry.DisplayIntervals)
             ?? TrackWireframe.Empty("Select a track with defined geometry.");
         ViewportSurface.SetScene(document?.Identity.Id, scene);
+        RefreshOperations();
     }
 
     private void UpdateViewportInfo()

@@ -10,10 +10,11 @@ using QuantumDynamix.Track;
 
 namespace QuantumDynamix.App;
 
-internal enum WireframePathKind { Heartline, Spine, Rail, Support }
+internal enum WireframePathKind { Heartline, Spine, Rail, Support, OperationalSegment }
 
 internal readonly record struct WireframeVertex(Vector3d Position, double? HeartlineStation);
-internal sealed record WireframePath(WireframePathKind Kind, string Id, IReadOnlyList<WireframeVertex> Vertices, Guid? RegionId = null);
+internal sealed record WireframePath(WireframePathKind Kind, string Id, IReadOnlyList<WireframeVertex> Vertices,
+    Guid? RegionId = null, Guid? SegmentId = null);
 internal readonly record struct WireframeControlPoint(int Index, Vector3d Position);
 internal readonly record struct WireframeBoundary(Guid RegionId, string RegionName, bool IsStart,
     double HeartlineStation, Vector3d Position, CurveFrame? Orientation);

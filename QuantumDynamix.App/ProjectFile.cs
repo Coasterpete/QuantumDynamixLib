@@ -11,11 +11,11 @@ using QuantumDynamix.Math.Timelines;
 
 namespace QuantumDynamix.App;
 
-internal static class ProjectFile
+internal static partial class ProjectFile
 {
     internal const string Extension = "qdproject";
     private const string Format = "quantum-dynamix-project";
-    private const int Version = 2;
+    private const int Version = 3;
     private const string Linear = "linear";
     private const string Piecewise = "piecewise";
 
@@ -30,7 +30,8 @@ internal static class ProjectFile
 
     private sealed record ProjectData(string Format, int Version, TrackData Track);
     private sealed record TrackData(string Name, double ReconstructionSpeedMetresPerSecond,
-        FrameData StartingFrame, AnchorData? ReconstructionAnchor, RegionData[] Regions);
+        FrameData StartingFrame, AnchorData? ReconstructionAnchor, RegionData[] Regions,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SegmentData[]? OperationalSegments = null);
     private sealed record AnchorData(double StationMetres, FrameData Frame,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? GeometricHeadingRadians = null);
     private sealed record RegionData(Guid Id, string Name, double StartMetres, double EndMetres, string Mode,
@@ -88,9 +89,10 @@ internal static class ProjectFile
         AnchorData? anchor = session.ReconstructionAnchor is { } origin
             ? new(origin.Station, FrameData.From(origin.Frame), origin.GeometricHeadingRadians) : null;
         var track = new TrackData(document.Identity.Name, speed, FrameData.From(session.InitialFrame), anchor,
-            session.Regions.Select(WriteRegion).ToArray());
-        int version = anchor?.GeometricHeadingRadians is not null || track.Regions.Any(region => region.Mode == "geometric" ||
-            region.Profiles.Any(profile => profile.Transitions is not null)) ? Version : 1;
+            session.Regions.Select(WriteRegion).ToArray(), session.Segments.Count == 0 ? null : session.Segments.Select(WriteSegment).ToArray());
+        int version = track.OperationalSegments is not null ? Version
+            : anchor?.GeometricHeadingRadians is not null || track.Regions.Any(region => region.Mode == "geometric" ||
+                region.Profiles.Any(profile => profile.Transitions is not null)) ? 2 : 1;
         string target = Path.GetFullPath(path);
         string temporary = Path.Combine(Path.GetDirectoryName(target)!, $".{Guid.NewGuid():N}.tmp");
         bool ownsTemporary = false;
@@ -170,9 +172,12 @@ internal static class ProjectFile
             }
             if (number is < 1 or > Version)
             {
-                throw new InvalidDataException($"Project format version {number} is unsupported. This application reads versions 1 and {Version}.");
+                throw new InvalidDataException($"Project format version {number} is unsupported. This application reads versions 1 through {Version}.");
             }
 
+            if (number < 3 && root.TryGetProperty("track", out JsonElement track) && track.ValueKind == JsonValueKind.Object &&
+                track.TryGetProperty("operationalSegments", out _))
+            { throw new InvalidDataException("Operational segments require project format version 3."); }
             return ReadTrack(root.Deserialize<ProjectData>(Json)!.Track, number);
         }
         catch (JsonException error)
@@ -237,7 +242,8 @@ internal static class ProjectFile
         }
 
         return new(track.Name, timeline: TimelineEditorSession.RestoreAuthored(
-            track.StartingFrame.ToFrame("starting frame"), track.ReconstructionSpeedMetresPerSecond, regions, anchor));
+            track.StartingFrame.ToFrame("starting frame"), track.ReconstructionSpeedMetresPerSecond, regions, anchor,
+            track.OperationalSegments?.Select(ReadSegment).ToArray()));
     }
 
     private static AuthoredRegion ReadRegion(RegionData source, int number, int version)

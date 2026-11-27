@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using QuantumDynamix.Math;
 
@@ -9,9 +10,6 @@ namespace QuantumDynamix.App;
 
 internal sealed partial class WorkspaceView
 {
-    private const string RegionName = "Region name";
-    private const string RegionLength = "Heartline length (m)";
-    private const string FirstStation = "First station (m)";
     private const string ForwardSpeed = "Prescribed forward speed (m/s)";
     private const string StartX = "Start X (m)";
     private const string StartY = "Start Y (m)";
@@ -69,81 +67,138 @@ internal sealed partial class WorkspaceView
         }
     }
 
-    private async void AppendRegion(object? sender, RoutedEventArgs e) => await CreateRegion(prepend: false);
-    private async void PrependRegion(object? sender, RoutedEventArgs e) => await CreateRegion(prepend: true);
+    // "Adjoining" keeps the adjoining Region's type, as the Region authoring rules already do.
+    private static readonly string[] NewRegionModes = ["Adjoining", "Coordinate accel.", "Force-based", "Geometric"];
 
-    private Task CreateRegion(bool prepend)
+    private void AppendRegion(object? sender, RoutedEventArgs e) => CreateRegion(prepend: false);
+    private void PrependRegion(object? sender, RoutedEventArgs e) => CreateRegion(prepend: true);
+
+    private void AppendRegionOnEnter(object? sender, KeyEventArgs e)
     {
-        TimelineEditorSession session = track!.Timeline;
-        var regions = session.Regions;
-        bool firstRegion = regions.Count == 0;
-        AuthoredRegion? neighbor = firstRegion ? null : prepend ? regions[0] : regions[^1];
-        string title = prepend ? "Prepend Region" : "Append Region";
-        string context = neighbor is null ? "Starts straight with zero banking. Set the first station above 0 m to leave room to prepend."
-            : prepend ? $"Before {neighbor.Name} · {Format(neighbor.Definition.Start)} m available."
-            : $"After {neighbor.Name} · joins at {Format(neighbor.Definition.End)} m.";
-        ComboBox? mode = null;
-        if (session.SupportsForceRegions)
+        if (e.Key == Key.Enter && AppendRegionButton.IsEnabled)
         {
-            mode = new ComboBox
-            {
-                ItemsSource = new[] { CoordinateAccelerationRegion, ForceBasedRegion, GeometricRegion },
-                SelectedItem = DescribeMode(neighbor?.Mode ?? RegionAuthoringMode.CoordinateAcceleration),
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch
-            };
-            AutomationProperties.SetName(mode, "Region mode");
+            CreateRegion(prepend: false);
+            e.Handled = true;
         }
-        return new AuthoringDialog(title, "Create", context, form =>
-        {
-            if (!TryReadNumber(form.Read(RegionLength), out double length))
-            {
-                return "Enter a finite, positive heartline length.";
-            }
-            double firstStation = 0;
-            if (firstRegion && !TryReadNumber(form.Read(FirstStation), out firstStation))
-            {
-                return "Enter a finite, nonnegative first station.";
-            }
-
-            RegionAuthoringMode selectedMode = mode?.SelectedItem switch
-            {
-                ForceBasedRegion => RegionAuthoringMode.Force,
-                GeometricRegion => RegionAuthoringMode.Geometric,
-                _ => RegionAuthoringMode.CoordinateAcceleration
-            };
-            string? error = session.AddRegion(prepend, length, firstStation, selectedMode);
-            if (error is null)
-            {
-                int index = prepend ? 0 : session.Regions.Count - 1;
-                RefreshRegions(session.Regions[index].Id, index, EditingChannel);
-                StatusLabel.Text = $"Added {session.Regions[index].Name}.";
-            }
-            return error;
-        }, firstRegion ? [(RegionLength, ""), (FirstStation, "0")] : [(RegionLength, "")], mode)
-            .ShowDialog((Window)TopLevel.GetTopLevel(this)!);
     }
 
-    private async void EditRegion(object? sender, RoutedEventArgs e)
+    private void RefreshNewRegionControls()
     {
-        int index = SelectedRegion;
-        var session = track!.Timeline;
-        AuthoredRegion region = session.Regions[index];
-        string range = $"{Format(region.Definition.Start)}–{Format(region.Definition.End)} m";
-        if (session.SupportsForceRegions) { range = $"{DescribeMode(region.Mode)} · {range}"; }
-        await ShowForm("Region Properties", "Apply", range, form =>
+        TimelineEditorSession? session = IsTrack ? track!.Timeline : null;
+        NewRegionPanel.IsVisible = session is not null;
+        if (session is null) { return; }
+        NewRegionModeLabel.IsVisible = NewRegionMode.IsVisible = session.SupportsForceRegions;
+        bool first = session.Regions.Count == 0;
+        FirstStationLabel.IsVisible = FirstStationInput.IsVisible = FirstStationUnit.IsVisible = first;
+        NewRegionLength.PlaceholderText = first ? "required" : "adjoining";
+        string tip = first ? "Heartline length of the first Region."
+            : "Leave blank to use the adjoining Region's length. Prepend uses at most the space before the first Region.";
+        ToolTip.SetTip(NewRegionLength, tip);
+        AutomationProperties.SetHelpText(NewRegionLength, tip);
+    }
+
+    /// <summary>Appends or prepends directly in the editor. The Region appears immediately as one Undo/Redo action.</summary>
+    private void CreateRegion(bool prepend)
+    {
+        if (!IsTrack) { return; }
+        graph.CancelDrag();
+        TimelineEditorSession session = track!.Timeline;
+        var regions = session.Regions;
+        AuthoredRegion? neighbor = regions.Count == 0 ? null : prepend ? regions[0] : regions[^1];
+        RegionAuthoringMode? mode = NewRegionMode.IsVisible ? NewRegionMode.SelectedIndex switch
         {
-            if (!TryReadNumber(form.Read(RegionLength), out double length))
-            {
-                return "Enter a finite, positive heartline length.";
-            }
-            string? error = session.UpdateRegion(index, form.Read(RegionName), length);
-            if (error is null)
-            {
-                RefreshRegions(region.Id, index, EditingChannel);
-                StatusLabel.Text = $"Updated {session.Regions[index].Name}.";
-            }
-            return error;
-        }, (RegionName, region.Name), (RegionLength, Format(region.Definition.End - region.Definition.Start)));
+            1 => RegionAuthoringMode.CoordinateAcceleration,
+            2 => RegionAuthoringMode.Force,
+            3 => RegionAuthoringMode.Geometric,
+            _ => null
+        } : null;
+
+        double length;
+        double firstStation = 0;
+        if (string.IsNullOrWhiteSpace(NewRegionLength.Text) && neighbor is not null)
+        {
+            length = neighbor.Definition.End - neighbor.Definition.Start;
+            if (prepend) { length = System.Math.Min(length, neighbor.Definition.Start); }
+        }
+        else if (!TryReadNumber(NewRegionLength.Text, out length))
+        {
+            StatusLabel.Text = neighbor is null ? "Enter the first Region's heartline length."
+                : "Enter a finite, positive heartline length, or leave Length blank to use the adjoining Region's length.";
+            NewRegionLength.Focus();
+            return;
+        }
+        if (neighbor is null && !TryReadNumber(FirstStationInput.Text, out firstStation))
+        {
+            StatusLabel.Text = "Enter a finite, nonnegative first station.";
+            FirstStationInput.Focus();
+            return;
+        }
+
+        string? error = session.AddRegion(prepend, length, firstStation, mode);
+        if (error is not null)
+        {
+            StatusLabel.Text = prepend && neighbor is not null
+                ? $"{error} {Format(neighbor.Definition.Start)} m is available before {neighbor.Name}." : error;
+            return;
+        }
+        int index = prepend ? 0 : session.Regions.Count - 1;
+        AuthoredRegion added = session.Regions[index];
+        // A blank length then repeats this Region's length through the adjoining-length default.
+        NewRegionLength.Text = "";
+        RefreshRegions(added.Id, index, EditingChannel);
+        StatusLabel.Text = $"Added {added.Name} · {DescribeMode(added.Mode)} · {DescribeExtent(added.Definition)}.";
+    }
+
+    private void EditRegion(object? sender, RoutedEventArgs e)
+    {
+        if (!IsTrack || SelectedRegion < 0) { return; }
+        SetInspectorMode(InspectorMode.Region);
+        KeyframePanel.ScrollToHome();
+        RegionNameInput.Focus();
+        RegionNameInput.SelectAll();
+    }
+
+    private void ShowRegionFields(object? sender, RoutedEventArgs e) => SetInspectorMode(InspectorMode.Region);
+
+    private void ApplyRegionOnEnter(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            ApplyRegionFields(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private void RefreshRegionFields()
+    {
+        if (!IsTrack || SelectedRegion < 0) { return; }
+        AuthoredRegion region = track!.Timeline.Regions[SelectedRegion];
+        RegionSummary.Text = $"{DescribeMode(region.Mode)} · {Format(region.Definition.Start)}–{Format(region.Definition.End)} m";
+        RegionNameInput.Text = region.Name;
+        RegionLengthInput.Text = Format(region.Definition.End - region.Definition.Start);
+    }
+
+    private void ApplyRegionFields(object? sender, RoutedEventArgs e)
+    {
+        if (!IsTrack || SelectedRegion < 0) { return; }
+        int index = SelectedRegion;
+        TimelineEditorSession session = track!.Timeline;
+        AuthoredRegion region = session.Regions[index];
+        if (!TryReadNumber(RegionLengthInput.Text, out double length))
+        {
+            StatusLabel.Text = "Enter a finite, positive heartline length.";
+            return;
+        }
+        string? error = session.UpdateRegion(index, RegionNameInput.Text ?? "", length);
+        if (error is null)
+        {
+            RefreshRegions(region.Id, index, EditingChannel);
+            StatusLabel.Text = $"Updated {session.Regions[index].Name} · {DescribeExtent(session.Regions[index].Definition)}.";
+        }
+        else
+        {
+            StatusLabel.Text = error;
+        }
     }
 
     private async void AddChannel(object? sender, RoutedEventArgs e)

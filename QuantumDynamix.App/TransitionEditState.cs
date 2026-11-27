@@ -11,7 +11,11 @@ internal readonly record struct GraphPosition(double Distance, double Value)
 internal abstract record TransitionEdit
 {
     internal sealed record Keyframe(string Channel, TimelineKeyframe Original, TimelineKeyframe Proposed) : TransitionEdit;
-    internal sealed record Boundary(double Original, double Proposed) : TransitionEdit;
+
+    /// <summary>A Region boundary moved along the distance axis.</summary>
+    /// <param name="Left">Index of the Region that ends at the boundary, or -1.</param>
+    /// <param name="Right">Index of the Region that starts at the boundary, or -1.</param>
+    internal sealed record Boundary(double Original, double Proposed, int Left = -1, int Right = -1) : TransitionEdit;
 }
 
 // A future interaction policy supplies the target, allowed neighbors, and mapping from pointer movement to an edit.

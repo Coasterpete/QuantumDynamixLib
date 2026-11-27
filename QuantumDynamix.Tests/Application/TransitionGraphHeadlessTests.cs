@@ -133,14 +133,15 @@ public sealed class TransitionGraphHeadlessTests
     }
 
     [TestMethod]
-    public async Task UnassignedSquareAndDiamondDoNotCreateEdits()
+    public async Task SquareAndDiamondAreInertWithoutABoundaryPolicy()
     {
-        await WithGraph(TransitionGraphFixture.CreateRegions(), (window, graph) =>
+        IReadOnlyList<Region> regions = TransitionGraphFixture.CreateRegions();
+        await WithGraph(regions, (window, graph) =>
         {
             var proposals = new List<TransitionEdit>();
             graph.EditProposed += proposals.Add;
             int presses = 0;
-            graph.PointerPressed += (_, _) => presses++;
+            graph.AddHandler(InputElement.PointerPressedEvent, (_, _) => presses++, RoutingStrategies.Bubble, handledEventsToo: true);
             Rect plot = graph.Viewport.Plot;
             double boundaryX = graph.Viewport.ProjectDistance(25);
             foreach (double y in new[] { plot.Top, plot.Bottom + 8 })
@@ -153,7 +154,143 @@ public sealed class TransitionGraphHeadlessTests
             }
             Assert.AreEqual(2, presses);
             Assert.IsEmpty(proposals);
+            Assert.AreSame(regions, graph.Regions);
+            Assert.IsFalse(graph.IsDragging);
         });
+    }
+
+    [TestMethod]
+    public async Task BoundaryPolicyMakesTheSquareAndDiamondDragTheRegionBoundary()
+    {
+        IReadOnlyList<Region> regions = TransitionGraphFixture.CreateRegions();
+        await WithGraph(regions, (window, graph) =>
+        {
+            graph.BoundaryPolicy = boundary => boundary.Left >= 0 && boundary.Right >= 0
+                ? new BoundaryDragLimits(regions[boundary.Left].Start, regions[boundary.Right].End) : null;
+            var proposals = new List<TransitionEdit>();
+            var selected = new List<GraphBoundary>();
+            graph.EditProposed += proposals.Add;
+            graph.BoundarySelected += selected.Add;
+            Rect plot = graph.Viewport.Plot;
+            foreach ((double y, double target) in new[] { (plot.Bottom + 8, 40.0), (plot.Top, 30.0) })
+            {
+                Point start = WindowPoint(graph, window, new(graph.Viewport.ProjectDistance(25), y));
+                Point end = WindowPoint(graph, window, new(graph.Viewport.ProjectDistance(target), y + 6));
+                window.MouseDown(start, MouseButton.Left);
+                window.MouseMove(end, RawInputModifiers.LeftMouseButton);
+                Assert.IsTrue(graph.IsDragging);
+                Assert.AreEqual(target, ((TransitionEdit.Boundary)graph.DragCandidate!).Proposed, 1e-12);
+                window.MouseUp(end, MouseButton.Left);
+                var moved = (TransitionEdit.Boundary)proposals[^1];
+                Assert.AreEqual(25, moved.Original);
+                Assert.AreEqual(target, moved.Proposed, 1e-12);
+                Assert.AreEqual((0, 1), (moved.Left, moved.Right));
+            }
+
+            // The outer start has no policy limits. It can be selected, but not dragged.
+            Point outer = WindowPoint(graph, window, new(graph.Viewport.ProjectDistance(0), plot.Top + 30));
+            window.MouseDown(outer, MouseButton.Left);
+            window.MouseMove(outer + new Point(40, 0), RawInputModifiers.LeftMouseButton);
+            window.MouseUp(outer + new Point(40, 0), MouseButton.Left);
+            Assert.HasCount(2, proposals);
+            Assert.AreEqual(new GraphBoundary(0, -1, 0), selected[^1]);
+        });
+    }
+
+    [TestMethod]
+    public async Task PointerJitterDoesNotMoveAKeyframeAndEachAxisUnlocksSeparately()
+    {
+        await WithGraph(TransitionGraphFixture.CreateRegions(), (window, graph) =>
+        {
+            graph.SetSelection(0, "Blue", [new(0, .1), new(10, .4), new(25, .2)], -1);
+            var proposals = new List<TransitionEdit.Keyframe>();
+            graph.EditProposed += edit => proposals.Add((TransitionEdit.Keyframe)edit);
+            Point key = WindowPoint(graph, window, graph.Viewport.Project(new(10, .4)));
+
+            Drag(new Point(1, -2));
+            Assert.AreEqual(proposals[^1].Original, proposals[^1].Proposed, "A click with a slight movement is not an edit.");
+            Drag(new Point(30, 1));
+            Assert.AreEqual(.4, proposals[^1].Proposed.Value, "The value stays exact until the pointer moves vertically.");
+            // Past the threshold the station follows the exact pointer displacement, without rounding.
+            Point local = window.TranslatePoint(key, graph)!.Value;
+            double expected = 10 + (graph.Viewport.Unproject(local + new Point(30, 1)).Distance - graph.Viewport.Unproject(local).Distance);
+            Assert.AreEqual(expected, proposals[^1].Proposed.Coordinate, 1e-12);
+            Assert.AreEqual(1, graph.SelectedKeyframe);
+
+            void Drag(Point offset)
+            {
+                window.MouseDown(key, MouseButton.Left);
+                window.MouseMove(key + offset, RawInputModifiers.LeftMouseButton);
+                window.MouseUp(key + offset, MouseButton.Left);
+            }
+        });
+    }
+
+    [TestMethod]
+    [DataRow(EasingKind.Quadratic, EasingDirection.In)]
+    [DataRow(EasingKind.Cubic, EasingDirection.Out)]
+    [DataRow(EasingKind.Quartic, EasingDirection.InOut)]
+    [DataRow(EasingKind.Quintic, EasingDirection.In)]
+    [DataRow(EasingKind.Sine, EasingDirection.In)]
+    [DataRow(EasingKind.Cosine, EasingDirection.Out)]
+    [DataRow(EasingKind.Plateau, EasingDirection.In)]
+    [DataRow(EasingKind.Plateau, EasingDirection.InOut)]
+    public async Task NonlinearTransitionsRasterizeOnTheirShapeNotTheChord(EasingKind kind, EasingDirection direction)
+    {
+        var profile = new ScalarTimeline(ProfileDomain.Distance,
+            [FunctionSegment.Transition(0, 100, .1, .9, new EasingFunction(kind, direction))]);
+        Region[] regions = [new(ProfileDomain.Distance, 0, 100, [KeyValuePair.Create("Blue", profile)])];
+        await WithGraph(regions, (window, graph) =>
+        {
+            graph.SetSelection(0, "Blue", [new(0, .1), new(100, .9)], -1);
+            CheckStroke(pixel => SystemMath.Abs(pixel.Red - 0x24) <= 40 && pixel.Green <= 40 && pixel.Blue >= 215, "profile");
+
+            // The selected Transition's 1 px white highlight blends with the blue stroke under it.
+            graph.SelectTransition(0, new TransitionShape(kind, direction).Description);
+            Assert.AreEqual($"{kind} {direction}", graph.SelectedTransitionLabel);
+            CheckStroke(pixel => pixel.Red >= 110 && pixel.Green >= 90 && pixel.Blue >= 200, "selection highlight");
+
+            void CheckStroke(Func<SKColor, bool> color, string stroke)
+            {
+                window.UpdateLayout();
+                Dispatcher.UIThread.RunJobs();
+                using var frame = window.CaptureRenderedFrame();
+                using var png = new MemoryStream();
+                frame!.Save(png, PngBitmapEncoderOptions.Default);
+                png.Position = 0;
+                using SKBitmap pixels = SKBitmap.Decode(png);
+                int separated = 0;
+                foreach (double u in new[] { .15, .3, .4, .6, .7, .85 })
+                {
+                    double value = .1 + .8 * ReferenceEasing.Evaluate(kind, direction, u);
+                    Assert.AreEqual(value, profile.Evaluate(100 * u).Value, 1e-12);
+                    Point curve = WindowPoint(graph, window, graph.Viewport.Project(new(100 * u, value)));
+                    Assert.IsTrue(HasColorNear(pixels, curve, color), $"The {kind} {direction} {stroke} is not drawn at {u}.");
+                    Point chord = WindowPoint(graph, window, graph.Viewport.Project(new(100 * u, .1 + .8 * u)));
+                    if (SystemMath.Abs(chord.Y - curve.Y) > 8)
+                    {
+                        separated++;
+                        Assert.IsFalse(HasColorNear(pixels, chord, color), $"The {kind} {direction} {stroke} is drawn on the straight chord at {u}.");
+                    }
+                }
+                Assert.IsGreaterThan(0, separated);
+            }
+        });
+    }
+
+    private static bool HasColorNear(SKBitmap pixels, Point location, Func<SKColor, bool> matches)
+    {
+        for (int row = (int)location.Y - 2; row <= (int)location.Y + 2; row++)
+        {
+            for (int column = (int)location.X - 2; column <= (int)location.X + 2; column++)
+            {
+                if (matches(pixels.GetPixel(column, row)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void CheckRenderedCurves(Window window, TransitionGraph graph, IReadOnlyList<Region> regions)

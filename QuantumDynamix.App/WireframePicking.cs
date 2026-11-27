@@ -5,9 +5,10 @@ using QuantumDynamix.Math;
 
 namespace QuantumDynamix.App;
 
-internal enum WireframeElement { Heartline, Spine, Rail, Support, ControlPoint, RegionBoundary, Forward, Left, Up }
+internal enum WireframeElement { Heartline, Spine, Rail, Support, ControlPoint, RegionBoundary, Forward, Left, Up, OperationalSegment }
 
-internal readonly record struct WireframeSelection(WireframeElement Element, string Id, string Label, Guid? RegionId = null)
+internal readonly record struct WireframeSelection(WireframeElement Element, string Id, string Label,
+    Guid? RegionId = null, Guid? SegmentId = null)
 {
     internal static WireframeSelection ForBoundary(WireframeBoundary boundary)
     {
@@ -30,19 +31,12 @@ internal sealed class ProjectedWireframe
     internal IReadOnlyList<ProjectedLine> Lines => lines;
     internal IReadOnlyList<ProjectedMarker> Markers => markers;
 
-    internal ProjectedWireframe(TrackWireframe scene, CameraProjection projection, double axisLength)
+    internal ProjectedWireframe(TrackWireframe scene, CameraProjection projection, double axisLength,
+        IReadOnlyList<WireframePath>? operations = null)
     {
         this.projection = projection;
-        foreach (WireframePath path in scene.Paths)
-        {
-            WireframeElement element = ElementFor(path.Kind);
-            string label = element is WireframeElement.Rail or WireframeElement.Support ? $"{element} {path.Id}" : path.Id;
-            var selection = new WireframeSelection(element, path.Id, label, path.RegionId);
-            for (int i = 1; i < path.Vertices.Count; i++)
-            {
-                AddLine(path.Vertices[i - 1].Position, path.Vertices[i].Position, selection, element);
-            }
-        }
+        foreach (WireframePath path in scene.Paths) { AddPath(path); }
+        foreach (WireframePath path in operations ?? []) { AddPath(path); }
 
         foreach (WireframeControlPoint control in scene.ControlPoints)
         {
@@ -67,10 +61,11 @@ internal sealed class ProjectedWireframe
         WireframePathKind.Rail => WireframeElement.Rail,
         WireframePathKind.Spine => WireframeElement.Spine,
         WireframePathKind.Support => WireframeElement.Support,
+        WireframePathKind.OperationalSegment => WireframeElement.OperationalSegment,
         _ => WireframeElement.Heartline
     };
 
-    internal WireframeSelection? Pick(double x, double y, double radius)
+    internal WireframeSelection? Pick(double x, double y, double radius, bool operationsOnly = false)
     {
         double bestDistance = radius * radius;
         double bestDepth = double.PositiveInfinity;
@@ -79,6 +74,7 @@ internal sealed class ProjectedWireframe
         // Give visible point markers priority at their centers, even where a path passes through them.
         foreach (ProjectedMarker marker in markers)
         {
+            if (operationsOnly) { break; }
             Consider(marker.Point.X, marker.Point.Y, marker.Point.Depth, marker.Selection);
         }
         if (result is not null)
@@ -88,6 +84,7 @@ internal sealed class ProjectedWireframe
 
         foreach (ProjectedLine line in lines)
         {
+            if (operationsOnly != line.Selection.SegmentId.HasValue) { continue; }
             double dx = line.End.X - line.Start.X;
             double dy = line.End.Y - line.Start.Y;
             double lengthSquared = dx * dx + dy * dy;
@@ -113,6 +110,15 @@ internal sealed class ProjectedWireframe
                 result = target;
             }
         }
+    }
+
+    private void AddPath(WireframePath path)
+    {
+        WireframeElement element = ElementFor(path.Kind);
+        string label = element is WireframeElement.Rail or WireframeElement.Support ? $"{element} {path.Id}" : path.Id;
+        var selection = new WireframeSelection(element, path.Id, label, path.RegionId, path.SegmentId);
+        for (int i = 1; i < path.Vertices.Count; i++)
+        { AddLine(path.Vertices[i - 1].Position, path.Vertices[i].Position, selection, element); }
     }
 
     private void AddLine(Vector3d start, Vector3d end, WireframeSelection selection, WireframeElement appearance)

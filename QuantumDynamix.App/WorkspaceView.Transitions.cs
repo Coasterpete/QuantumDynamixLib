@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using QuantumDynamix.Math.Functions;
 
@@ -8,7 +9,11 @@ namespace QuantumDynamix.App;
 
 internal sealed partial class WorkspaceView
 {
-    private bool editingTransitions;
+    /// <summary>The numeric inspector beside the Transition Editor. Each mode edits what the graph selects.</summary>
+    private enum InspectorMode { Keyframes, Transitions, Region }
+
+    private InspectorMode inspector;
+    private bool showingTransition;
 
     private void InitializeTransitionControls()
     {
@@ -18,27 +23,44 @@ internal sealed partial class WorkspaceView
         ToolTip.SetTip(PrependTransitionButton, "Split the selected transition and insert a new span before it.");
         ToolTip.SetTip(AppendTransitionButton, "Split the selected transition and insert a new span after it.");
         ToolTip.SetTip(PlateauFields, "Fractions of the base In function's length and value change.");
+        foreach (TextBox input in new[] { TransitionLength, TransitionStart, TransitionEnd, HoldStart, HoldEnd, HoldValue })
+        {
+            input.TextChanged += (_, _) => RefreshTransitionPending();
+            input.KeyDown += ApplyTransitionOnEnter;
+        }
+        ToolTip.SetTip(TransitionKind, "Choosing a function applies it to the selected Transition. Undo restores the previous one.");
+        ToolTip.SetTip(TransitionDirection, "Choosing a direction applies it to the selected Transition.");
+        NewRegionMode.ItemsSource = NewRegionModes;
+        NewRegionMode.SelectedIndex = 0;
+        ToolTip.SetTip(NewRegionMode, "Type for Append Region and Prepend Region. Adjoining uses the type of the Region it joins.");
     }
 
-    private void ShowTransitions(object? sender, RoutedEventArgs e) => SetTransitionMode(true);
-    private void ShowKeyframes(object? sender, RoutedEventArgs e) => SetTransitionMode(false);
+    private void ShowTransitions(object? sender, RoutedEventArgs e) => SetInspectorMode(InspectorMode.Transitions);
+    private void ShowKeyframes(object? sender, RoutedEventArgs e) => SetInspectorMode(InspectorMode.Keyframes);
 
-    private void SetTransitionMode(bool show)
+    private void SetTransitionMode(bool show) => SetInspectorMode(show ? InspectorMode.Transitions : InspectorMode.Keyframes);
+
+    private void SetInspectorMode(InspectorMode mode)
     {
-        editingTransitions = show;
+        inspector = mode;
         RefreshEditMode();
         UpdateKeyframeSelection();
         UpdateTransitionSelection();
+        RefreshRegionFields();
     }
 
     private void RefreshEditMode()
     {
-        ProfileEditModes.IsVisible = IsTrack && EditingChannel is not null;
+        bool region = IsTrack && SelectedRegion >= 0;
+        bool profile = region && EditingChannel is not null;
+        ProfileEditModes.IsVisible = region;
         KeyframesHeading.IsVisible = !ProfileEditModes.IsVisible;
-        TransitionFields.IsVisible = ProfileEditModes.IsVisible && editingTransitions;
-        KeyframeFields.IsVisible = !TransitionFields.IsVisible;
-        TransitionsButton.IsEnabled = !editingTransitions;
-        KeyframesButton.IsEnabled = editingTransitions;
+        RegionFields.IsVisible = region && inspector == InspectorMode.Region;
+        TransitionFields.IsVisible = profile && inspector == InspectorMode.Transitions;
+        KeyframeFields.IsVisible = !RegionFields.IsVisible && !TransitionFields.IsVisible;
+        RegionInspectorButton.IsEnabled = inspector != InspectorMode.Region;
+        TransitionsButton.IsEnabled = profile && inspector != InspectorMode.Transitions;
+        KeyframesButton.IsEnabled = profile && inspector != InspectorMode.Keyframes;
     }
 
     private void RefreshTransitions(int selection)
@@ -50,7 +72,7 @@ internal sealed partial class WorkspaceView
             var keys = Session!.Keys(SelectedRegion, channel);
             TransitionShape[] shapes = Session.Regions[SelectedRegion].Shapes(channel);
             TransitionSpan.ItemsSource = shapes.Select((shape, index) =>
-                $"{keys[index].Coordinate:G6}–{keys[index + 1].Coordinate:G6} m · {shape.Name}").ToArray();
+                $"{keys[index].Coordinate:G6}–{keys[index + 1].Coordinate:G6} m · {shape.Description}").ToArray();
             TransitionSpan.SelectedIndex = System.Math.Clamp(selection, 0, shapes.Length - 1);
         }
         else
@@ -68,16 +90,19 @@ internal sealed partial class WorkspaceView
 
     private void SelectTransitionOnGraph(int index)
     {
-        editingTransitions = true;
+        inspector = InspectorMode.Transitions;
         RefreshEditMode();
         TransitionSpan.SelectedIndex = index;
         UpdateTransitionSelection();
     }
 
+    /// <summary>Shows the committed Transition. The form, graph label, and span list always name the committed function.</summary>
     private void UpdateTransitionSelection()
     {
         int span = TransitionSpan.SelectedIndex;
-        graph.SelectTransition(TransitionFields.IsVisible ? span : -1);
+        graph.SelectTransition(-1);
+        TransitionShapeNote.IsVisible = false;
+        ShowTransitionPending(false);
         if (!IsTrack || span < 0 || EditingChannel is not { } channel) { return; }
 
         var session = Session!;
@@ -85,6 +110,8 @@ internal sealed partial class WorkspaceView
         TransitionShape shape = session.Regions[SelectedRegion].Shapes(channel)[span];
         double start = keys[span].Coordinate;
         double length = keys[span + 1].Coordinate - start;
+        if (TransitionFields.IsVisible) { graph.SelectTransition(span, shape.Description); }
+        showingTransition = true;
         TransitionKind.SelectedItem = shape.Name;
         TransitionDirection.SelectedItem = shape.Direction;
         TransitionLength.Text = Format(length);
@@ -102,6 +129,10 @@ internal sealed partial class WorkspaceView
         HoldValue.Text = Format(shape.HoldValue);
         DeleteTransitionButton.IsEnabled = keys.Count > 2;
         SelectTransitionKind(null, null);
+        showingTransition = false;
+        // y = y₀ + (y₁ − y₀)E(u) is flat for every function when y₀ = y₁. Say so instead of drawing a silent straight line.
+        TransitionShapeNote.IsVisible = shape.Kind is not null && TransitionShape.IsFlat(keys[span], keys[span + 1]);
+        RefreshTransitionPending();
         if (TransitionFields.IsVisible) { RefreshCalculatedForce(start + length / 2); }
     }
 
@@ -110,6 +141,71 @@ internal sealed partial class WorkspaceView
         string? kind = TransitionKind.SelectedItem as string;
         TransitionDirection.IsEnabled = kind is not null and not "Constant" and not nameof(EasingKind.Linear);
         PlateauFields.IsVisible = kind == nameof(EasingKind.Plateau);
+        if (e is not null && !showingTransition && !updatingControls && TransitionFields.IsVisible)
+        {
+            // A function choice applies at once, so the curve, 3D track, and history always match the selector.
+            ApplyTransition(sender, e);
+        }
+    }
+
+    private void SelectTransitionDirection(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!showingTransition && !updatingControls && TransitionFields.IsVisible && TransitionDirection.IsEnabled)
+        {
+            ApplyTransition(sender, e);
+        }
+    }
+
+    private void ApplyTransitionOnEnter(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            ApplyTransition(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Shows whether typed lengths, values, or Plateau fractions differ from the committed Transition.</summary>
+    private void RefreshTransitionPending()
+    {
+        if (showingTransition || !TransitionFields.IsVisible || TransitionSpan.SelectedIndex < 0 ||
+            EditingChannel is not { } channel || Session is not { } session)
+        {
+            return;
+        }
+        int span = TransitionSpan.SelectedIndex;
+        var keys = session.Keys(SelectedRegion, channel);
+        TransitionShape shape = session.Regions[SelectedRegion].Shapes(channel)[span];
+        bool plateau = PlateauFields.IsVisible;
+        ShowTransitionPending(TransitionLength.Text != Format(keys[span + 1].Coordinate - keys[span].Coordinate) ||
+            TransitionStart.Text != Format(keys[span].Value) || TransitionEnd.Text != Format(keys[span + 1].Value) ||
+            (plateau && (HoldStart.Text != Format(shape.HoldStart) || HoldEnd.Text != Format(shape.HoldEnd) ||
+                HoldValue.Text != Format(shape.HoldValue))));
+    }
+
+    internal bool TransitionValuesPending => ApplyTransitionButton.Classes.Contains("pending");
+
+    private void ShowTransitionPending(bool pending)
+    {
+        if (pending == TransitionValuesPending) { return; }
+        ApplyTransitionButton.Classes.Set("pending", pending);
+        const string hint = "Typed Transition values are not applied. Press Enter or Apply.";
+        ToolTip.SetTip(ApplyTransitionButton, pending ? hint : null);
+        if (pending) { StatusLabel.Text = hint; }
+    }
+
+    // Restores the selectors after a rejected choice. Typed values stay for correction.
+    private void ShowCommittedFunction()
+    {
+        int span = TransitionSpan.SelectedIndex;
+        if (span < 0 || EditingChannel is not { } channel) { return; }
+        TransitionShape shape = Session!.Regions[SelectedRegion].Shapes(channel)[span];
+        showingTransition = true;
+        TransitionKind.SelectedItem = shape.Name;
+        TransitionDirection.SelectedItem = shape.Direction;
+        SelectTransitionKind(null, null);
+        showingTransition = false;
+        RefreshTransitionPending();
     }
 
     private void PrependTransition(object? sender, RoutedEventArgs e) => InsertTransition(insertBefore: true);
@@ -133,10 +229,12 @@ internal sealed partial class WorkspaceView
     {
         int span = TransitionSpan.SelectedIndex;
         if (EditingChannel is not { } channel || span < 0) { return; }
+        bool fromSelector = sender is ComboBox;
         if (!TryReadNumber(TransitionLength.Text, out double length) ||
             !TryReadNumber(TransitionStart.Text, out double from) || !TryReadNumber(TransitionEnd.Text, out double to))
         {
             StatusLabel.Text = "Enter finite values for the transition length and endpoints.";
+            if (fromSelector) { ShowCommittedFunction(); }
             return;
         }
         EasingKind? kind = Enum.TryParse(TransitionKind.SelectedItem as string, out EasingKind selected) ? selected : null;
@@ -149,12 +247,24 @@ internal sealed partial class WorkspaceView
                 !TryReadNumber(HoldValue.Text, out double h))
             {
                 StatusLabel.Text = "Enter finite fractions for the plateau start, end, and value.";
+                if (fromSelector) { ShowCommittedFunction(); }
                 return;
             }
             shape = new(kind, direction, a, b, h);
         }
-        FinishTransitionEdit(Session!.UpdateTransition(SelectedRegion, channel, span, length, from, to, shape),
-            span, "Updated the transition.");
+        var before = Session!.Regions;
+        string? error = Session.UpdateTransition(SelectedRegion, channel, span, length, from, to, shape);
+        if (error is not null)
+        {
+            // Rejected edits keep the committed Transition, geometry, and history.
+            StatusLabel.Text = error;
+            if (fromSelector) { ShowCommittedFunction(); }
+            return;
+        }
+        FinishTransitionEdit(null, span, ReferenceEquals(before, Session.Regions)
+            ? $"The Transition is already {shape.Description}."
+            : $"Applied {shape.Description} to {Format(Session.Keys(SelectedRegion, channel)[span].Coordinate)}–" +
+              $"{Format(Session.Keys(SelectedRegion, channel)[span + 1].Coordinate)} m. Undo restores the previous Transition.");
     }
 
     private void FinishTransitionEdit(string? error, int selection, string success)

@@ -199,7 +199,7 @@ public sealed class ProjectFileTests
     [DataRow("{", "Invalid or incomplete project JSON")]
     [DataRow("[]", "not a QUANTUM DYNAMIX project")]
     [DataRow("""{"format":"quantum-dynamix-project"}""", "integer format version")]
-    [DataRow("""{"format":"quantum-dynamix-project","version":3}""", "version 3 is unsupported")]
+    [DataRow("""{"format":"quantum-dynamix-project","version":4}""", "version 4 is unsupported")]
     [DataRow("""{"format":"quantum-dynamix-project","version":1,"version":1}""", "Invalid or incomplete project JSON")]
     [DataRow("""{"format":"quantum-dynamix-project","version":1,"track":null}""", "Invalid or incomplete project JSON")]
     public void RejectsInvalidOrUnsupportedProjectEnvelopes(string json, string diagnostic)

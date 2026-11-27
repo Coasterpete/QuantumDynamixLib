@@ -26,7 +26,7 @@ namespace QuantumDynamix.Tests.Application;
 
 [TestClass]
 [DoNotParallelize]
-public sealed class AppNavigationTests
+public sealed partial class AppNavigationTests
 {
     [TestMethod]
     public async Task MainWindowStartsWithBrandedWelcome()
@@ -192,8 +192,7 @@ public sealed class AppNavigationTests
             Capture(window, "01-new-track.png");
 
             const string banking = TrackDocument.BankingChannel;
-            Click(window, "AppendRegionButton");
-            FillForm(window, "Create", ("Heartline length (m)", "50"), ("First station (m)", "20"));
+            AddRegionInline(window, "50", "20");
             Assert.AreEqual(0, list.SelectedIndex);
             Assert.AreEqual(0, graph.SelectedRegion);
             Assert.AreEqual(0, graph.Regions[0].Channels[banking].Evaluate(45).Value, 1e-12);
@@ -204,18 +203,16 @@ public sealed class AppNavigationTests
             FillForm(window, "Add", ("Channel name", "Join profile"), ("Start value", Local(.2)), ("End value", Local(.6)));
             Region main = graph.Regions[0];
 
-            Click(window, "PrependRegionButton");
-            Assert.HasCount(1, GetDialog(window).GetLogicalDescendants().OfType<TextBox>().ToArray());
-            FillForm(window, "Create", ("Heartline length (m)", "20"));
+            Assert.IsFalse(workspace.FindControl<TextBox>("FirstStationInput")!.IsVisible);
+            // A blank length prepends the adjoining length, limited to the 20 m available before the first Region.
+            AddRegionInline(window, null, prepend: true);
             Assert.AreEqual(0, graph.SelectedRegion);
             Assert.AreEqual(0, graph.Regions[0].Start);
             Assert.AreEqual(.2, graph.Regions[0].Channels["Join profile"].Evaluate(10).Value, 1e-12);
             Assert.AreEqual(0, graph.Regions[0].DiagnoseJoin(main, "Join profile", [0]).MatchingOrder);
             Assert.IsFalse(workspace.FindControl<Button>("PrependRegionButton")!.IsEnabled);
 
-            Click(window, "AppendRegionButton");
-            Assert.HasCount(1, GetDialog(window).GetLogicalDescendants().OfType<TextBox>().ToArray());
-            FillForm(window, "Create", ("Heartline length (m)", "30"));
+            AddRegionInline(window, "30");
             Assert.AreEqual(2, graph.SelectedRegion);
             Assert.AreSame(main, graph.Regions[1]);
             Region exit = graph.Regions[2];
@@ -233,8 +230,7 @@ public sealed class AppNavigationTests
             window.MouseDown(header, MouseButton.Left);
             window.MouseUp(header, MouseButton.Left);
             Assert.AreEqual(1, list.SelectedIndex);
-            OpenMenu(workspace, "RegionPropertiesMenu");
-            FillForm(window, "Apply", ("Region name", "Main profile"));
+            EditRegionInline(window, name: "Main profile");
             Assert.AreEqual("Main profile", graph.RegionName(1));
             Assert.AreEqual("Main profile", ((ListBoxItem)list.SelectedItem!).Content);
 
@@ -243,6 +239,7 @@ public sealed class AppNavigationTests
             Assert.HasCount(5, graph.Channels);
             Assert.AreEqual("Profile B", workspace.FindControl<ListBox>("ActiveChannel")!.SelectedItem);
             Assert.IsFalse(graph.Regions[0].Channels.ContainsKey("Profile B"));
+            ClickEditorControl(window, "KeyframesButton");
             workspace.FindControl<TextBox>("StationInput")!.Text = "45";
             workspace.FindControl<TextBox>("ValueInput")!.Text = Local(.8);
             Click(window, "AddKeyButton");
@@ -326,14 +323,12 @@ public sealed class AppNavigationTests
             var graph = (TransitionGraph)workspace.FindControl<ContentControl>("TransitionGraphHost")!.Content!;
             Assert.IsFalse(viewport.HasGeometry);
 
-            Click(window, "AppendRegionButton");
-            FillForm(window, "Create", ("Heartline length (m)", "20"), ("First station (m)", "10"));
+            AddRegionInline(window, "20", "10");
             Assert.IsTrue(viewport.HasGeometry);
             Guid first = viewport.ActiveRegionId!.Value;
             AssertNear(new(4, 5, 6), Boundary(first, start: true).Position);
 
-            Click(window, "AppendRegionButton");
-            FillForm(window, "Create", ("Heartline length (m)", "15"));
+            AddRegionInline(window, "15");
             Guid second = viewport.ActiveRegionId!.Value;
             AssertNear(new(4, 40, 6), Boundary(second, start: false).Position);
             AssertJoin(first, second);
@@ -367,8 +362,7 @@ public sealed class AppNavigationTests
             AssertJoin(first, second);
 
             TrackWireframe beforeResize = viewport.Scene;
-            OpenMenu(workspace, "RegionPropertiesMenu");
-            FillForm(window, "Apply", ("Heartline length (m)", "30"));
+            EditRegionInline(window, length: "30");
             Assert.AreEqual(40, graph.Regions[1].Start);
             Assert.AreEqual(55, graph.Regions[1].End);
             Assert.AreEqual(4, graph.Regions[0].Channels[RegionTrackGeometry.LateralChannel].Evaluate(25).Value);
@@ -406,8 +400,8 @@ public sealed class AppNavigationTests
     }
 
     [TestMethod]
-    [DataRow("Force-based Region", RegionTrackGeometry.NormalForceChannel, 1.7)]
-    [DataRow("Geometric Region", RegionTrackGeometry.PitchChangeChannel, 5.0)]
+    [DataRow("Force-based", RegionTrackGeometry.NormalForceChannel, 1.7)]
+    [DataRow("Geometric", RegionTrackGeometry.PitchChangeChannel, 5.0)]
     public async Task MathematicalTransitionsEditTheRealProfileAndHeartline(string mode, string channel, double target)
     {
         await WithMainWindow(window =>
@@ -416,9 +410,7 @@ public sealed class AppNavigationTests
             var workspace = (WorkspaceView)window.Content!;
             Click(window, "NewTrackButton");
             FillForm(window, "Create", ("Track name", "Transition Track"));
-            Click(window, "AppendRegionButton");
-            GetDialog(window).GetLogicalDescendants().OfType<ComboBox>().Single().SelectedItem = mode;
-            FillForm(window, "Create", ("Heartline length (m)", "24"), ("First station (m)", "4"));
+            AddRegionInline(window, "24", "4", mode);
             Assert.AreEqual(channel, workspace.FindControl<ListBox>("ActiveChannel")!.SelectedItem);
             var graph = (TransitionGraph)workspace.FindControl<ContentControl>("TransitionGraphHost")!.Content!;
             var viewport = workspace.FindControl<TrackViewport>("ViewportSurface")!;
@@ -442,7 +434,7 @@ public sealed class AppNavigationTests
             Assert.AreEqual(baseline + (target - baseline) / 16, applied.Evaluate(18.5).Value, 1e-12);
             Assert.IsGreaterThan(.05, (viewport.Scene.Boundaries[^1].Position - straight).Length);
             StringAssert.Contains(workspace.FindControl<TextBlock>("CalculatedForce")!.Text!, "Calculated at");
-            if (mode == "Geometric Region")
+            if (mode == "Geometric")
             {
                 StringAssert.Contains(workspace.FindControl<TextBlock>("CalculatedForce")!.Text!, "Curvature");
             }
@@ -460,10 +452,10 @@ public sealed class AppNavigationTests
             Assert.AreEqual(2, span.SelectedIndex);
             Assert.AreEqual("Linear", kind.SelectedItem);
 
-            Click(window, "PrependRegionButton");
-            Assert.AreEqual(mode, GetDialog(window).GetLogicalDescendants().OfType<ComboBox>().Single().SelectedItem);
-            FillForm(window, "Create", ("Heartline length (m)", "3"));
+            // "Adjoining" keeps the neighbor's Region type.
+            AddRegionInline(window, "3", mode: "Adjoining", prepend: true);
             Assert.HasCount(2, graph.Regions);
+            Assert.IsTrue(graph.Regions[0].Channels.ContainsKey(channel));
 
             void ClickTransition(string name)
             {
@@ -490,11 +482,9 @@ public sealed class AppNavigationTests
             FillForm(window, "Create", ("Track name", "Force Track"));
             var graph = (TransitionGraph)workspace.FindControl<ContentControl>("TransitionGraphHost")!.Content!;
 
-            Click(window, "AppendRegionButton");
-            ComboBox mode = RegionMode();
-            Assert.AreEqual("Coordinate-acceleration Region", mode.SelectedItem);
-            mode.SelectedItem = "Force-based Region";
-            FillForm(window, "Create", ("Heartline length (m)", "20"));
+            Assert.AreEqual("Adjoining", workspace.FindControl<ComboBox>("NewRegionMode")!.SelectedItem);
+            Assert.AreEqual("0", workspace.FindControl<TextBox>("FirstStationInput")!.Text);
+            AddRegionInline(window, "20", mode: "Force-based");
             Guid first = viewport.ActiveRegionId!.Value;
             Assert.AreEqual(RegionTrackGeometry.NormalForceChannel, profiles.SelectedItem);
             Assert.HasCount(4, viewport.Scene.Paths);
@@ -518,9 +508,7 @@ public sealed class AppNavigationTests
             Assert.IsTrue(viewport.Projected.Lines.Any(line => line.Selection.Element == WireframeElement.Rail));
             Capture(window, "force-region-authoring");
 
-            Click(window, "AppendRegionButton");
-            Assert.AreEqual("Force-based Region", RegionMode().SelectedItem);
-            FillForm(window, "Create", ("Heartline length (m)", "9"));
+            AddRegionInline(window, "9", mode: "Adjoining");
             Guid second = viewport.ActiveRegionId!.Value;
             TrackWireframe extended = viewport.Scene;
             Assert.AreNotEqual(first, second);
@@ -545,9 +533,6 @@ public sealed class AppNavigationTests
             Click(window, "RedoButton");
             Assert.AreSame(extended, viewport.Scene);
             Assert.HasCount(2, graph.Regions);
-
-            ComboBox RegionMode() => GetDialog(window).GetLogicalDescendants().OfType<ComboBox>()
-                .Single(control => AutomationProperties.GetName(control) == "Region mode");
 
             Vector3d RailAt(string id) => viewport.Scene.Paths.Single(path => path.Id == id)
                 .Vertices.Single(vertex => vertex.HeartlineStation == 10).Position;
@@ -617,9 +602,9 @@ public sealed class AppNavigationTests
             FillForm(window, "Create", ("Track name", "Banking test"));
             var graph = (TransitionGraph)workspace.FindControl<ContentControl>("TransitionGraphHost")!.Content!;
 
-            Click(window, "AppendRegionButton");
-            Assert.AreEqual("0", GetDialog(window).Read("First station (m)"));
-            FillForm(window, "Create", ("Heartline length (m)", "10"));
+            Assert.IsTrue(workspace.FindControl<TextBox>("FirstStationInput")!.IsVisible);
+            Assert.AreEqual("0", workspace.FindControl<TextBox>("FirstStationInput")!.Text);
+            AddRegionInline(window, "10");
             workspace.FindControl<TextBox>("StationInput")!.Text = "4";
             workspace.FindControl<TextBox>("ValueInput")!.Text = Local(originalAngle);
             Click(window, "AddKeyButton");
@@ -661,7 +646,7 @@ public sealed class AppNavigationTests
     [TestMethod]
     public async Task ReferenceViewportFollowsCommittedBankingAndPreservesTheUserTrack()
     {
-        await WithMainWindow(window =>
+        await WithMainWindowAsync(async window =>
         {
             Click(window, "OpenEditorButton");
             var workspace = (WorkspaceView)window.Content!;
@@ -690,9 +675,14 @@ public sealed class AppNavigationTests
             window.MouseDown(GraphPoint(0), MouseButton.Left);
             window.MouseMove(GraphPoint(angle), RawInputModifiers.LeftMouseButton);
             Assert.AreNotSame(graph.Regions, graph.DisplayedRegions);
+            // The viewport previews the bound banking live. The committed scene is unchanged until release.
+            await workspace.WhenLivePreviewIdle();
             Assert.AreSame(before, viewport.Scene);
-            Assert.AreEqual(railBeforeDrag, viewport.Projected.Lines.First(line => line.Selection.Id == "inner"));
+            Assert.IsNotNull(viewport.PreviewScene);
+            Assert.AreEqual(1.5 * System.Math.Sin(angle), RailHeight(viewport.PreviewScene), 1e-10);
+            Assert.AreNotEqual(railBeforeDrag, viewport.Projected.Lines.First(line => line.Selection.Id == "inner"));
             window.MouseUp(GraphPoint(angle), MouseButton.Left);
+            Assert.IsNull(viewport.PreviewScene);
             TrackWireframe after = viewport.Scene;
             var heartline = TrackWireframeTests.Vertices(before, "Heartline");
             CollectionAssert.AreEqual(heartline, TrackWireframeTests.Vertices(after, "Heartline"));
@@ -830,19 +820,18 @@ public sealed class AppNavigationTests
             var workspace = (WorkspaceView)window.Content!;
             Click(window, "NewTrackButton");
             FillForm(window, "Create", ("Track name", "West Track"));
-            Click(window, "AppendRegionButton");
-            FillForm(window, "Create", ("Heartline length (m)", "20"), ("First station (m)", "5"));
+            AddRegionInline(window, "20", "5");
             TransitionGraph Graph() => (TransitionGraph)workspace.FindControl<ContentControl>("TransitionGraphHost")!.Content!;
             var definition = Graph().Regions[0];
+            var status = workspace.FindControl<TextBlock>("StatusLabel")!;
 
-            Click(window, "PrependRegionButton");
-            AuthoringDialog dialog = FillForm(window, "Create", ("Heartline length (m)", "6"));
-            AssertFormError(dialog, "at or after");
+            AddRegionInline(window, "6", prepend: true);
+            StringAssert.Contains(status.Text!, "at or after");
+            StringAssert.Contains(status.Text!, "5 m is available");
             Assert.AreSame(definition, Graph().Regions.Single());
-            ClickDialog(dialog, "Cancel");
 
             OpenMenu(workspace, "AddChannelMenu");
-            dialog = FillForm(window, "Add", ("Channel name", TrackDocument.BankingChannel), ("Start value", "0"), ("End value", "1"));
+            AuthoringDialog dialog = FillForm(window, "Add", ("Channel name", TrackDocument.BankingChannel), ("Start value", "0"), ("End value", "1"));
             AssertFormError(dialog, "already exists");
             ClickDialog(dialog, "Cancel");
             OpenMenu(workspace, "AddChannelMenu");
@@ -889,14 +878,14 @@ public sealed class AppNavigationTests
             Assert.IsFalse(workspace.FindControl<Button>("UndoButton")!.IsEnabled);
             Assert.AreEqual("Track · East Track", workspace.FindControl<TextBlock>("ModeLabel")!.Text);
 
-            Click(window, "AppendRegionButton");
-            dialog = FillForm(window, "Create", ("Heartline length (m)", "0"));
-            AssertFormError(dialog, "positive heartline length");
-            FillForm(window, "Create", ("Heartline length (m)", Local(1e308)), ("First station (m)", Local(1e308)));
-            AssertFormError(dialog, "cannot be represented");
+            AddRegionInline(window, null);
+            StringAssert.Contains(status.Text!, "first Region's heartline length");
+            AddRegionInline(window, "0");
+            StringAssert.Contains(status.Text!, "positive heartline length");
+            AddRegionInline(window, Local(1e308), Local(1e308));
+            StringAssert.Contains(status.Text!, "cannot be represented");
             Assert.IsEmpty(Graph().Regions);
             Assert.IsFalse(workspace.FindControl<Button>("UndoButton")!.IsEnabled);
-            ClickDialog(dialog, "Cancel");
         });
     }
 
@@ -920,11 +909,8 @@ public sealed class AppNavigationTests
                     ("Start pitch (degrees above horizontal)", "15"));
                 Assert.IsTrue(workspace.HasUnsavedChanges);
                 StringAssert.Contains(window.Title!, "*");
-                Click(window, "AppendRegionButton");
-                FillForm(window, "Create", ("Heartline length (m)", "20"));
-                Click(window, "AppendRegionButton");
-                GetDialog(window).GetLogicalDescendants().OfType<ComboBox>().Single().SelectedIndex = 1;
-                FillForm(window, "Create", ("Heartline length (m)", "15"));
+                AddRegionInline(window, "20");
+                AddRegionInline(window, "15", mode: "Force-based");
 
                 var channels = workspace.FindControl<ListBox>("ActiveChannel")!;
                 channels.SelectedItem = RegionTrackGeometry.NormalForceChannel;
@@ -1032,8 +1018,7 @@ public sealed class AppNavigationTests
                 var workspace = (WorkspaceView)window.Content!;
                 Click(window, "NewTrackButton");
                 FillForm(window, "Create", ("Track name", "Keep this track"));
-                Click(window, "AppendRegionButton");
-                FillForm(window, "Create", ("Heartline length (m)", "20"));
+                AddRegionInline(window, "20");
                 var viewport = workspace.FindControl<TrackViewport>("ViewportSurface")!;
                 TrackWireframe scene = viewport.Scene;
                 var status = workspace.FindControl<TextBlock>("StatusLabel")!;
@@ -1108,6 +1093,36 @@ public sealed class AppNavigationTests
 
     private static AuthoringDialog GetDialog(Window window) =>
         window.OwnedWindows.OfType<AuthoringDialog>().Single();
+
+    /// <summary>Uses the inline Region List controls. A null length uses the adjoining Region's length.</summary>
+    private static void AddRegionInline(Window window, string? length, string? firstStation = null, string? mode = null,
+        bool prepend = false)
+    {
+        var workspace = (WorkspaceView)window.Content!;
+        if (mode is not null)
+        {
+            workspace.FindControl<ComboBox>("NewRegionMode")!.SelectedItem = mode;
+        }
+        workspace.FindControl<TextBox>("NewRegionLength")!.Text = length ?? "";
+        if (firstStation is not null)
+        {
+            workspace.FindControl<TextBox>("FirstStationInput")!.Text = firstStation;
+        }
+        int dialogs = window.OwnedWindows.Count;
+        ClickEditorControl(window, prepend ? "PrependRegionButton" : "AppendRegionButton");
+        Assert.HasCount(dialogs, window.OwnedWindows, "Append and Prepend Region must not open a dialog.");
+    }
+
+    /// <summary>Edits the selected Region through the inline Region inspector.</summary>
+    private static void EditRegionInline(Window window, string? name = null, string? length = null)
+    {
+        var workspace = (WorkspaceView)window.Content!;
+        OpenMenu(workspace, "RegionPropertiesMenu");
+        Assert.IsTrue(workspace.FindControl<StackPanel>("RegionFields")!.IsVisible);
+        if (name is not null) { workspace.FindControl<TextBox>("RegionNameInput")!.Text = name; }
+        if (length is not null) { workspace.FindControl<TextBox>("RegionLengthInput")!.Text = length; }
+        ClickEditorControl(window, "ApplyRegionButton");
+    }
 
     private static AuthoringDialog FillForm(Window window, string action, params (string Label, string Value)[] fields)
     {

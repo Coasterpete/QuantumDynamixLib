@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -19,6 +20,7 @@ internal sealed class TrackViewport : Control
     private static readonly ImmutablePen ForwardPen = new(Brushes.IndianRed, 1.5);
     private static readonly ImmutablePen UpPen = new(Brushes.DodgerBlue, 1.5);
     private static readonly ImmutablePen SelectedPen = new(Brushes.Gold, 2.5);
+    private static readonly ImmutablePen OperationalSegmentPen = new(Brushes.LightSeaGreen, 2.5);
 
     private readonly TrackCamera camera = new();
     private Guid? trackId;
@@ -31,15 +33,50 @@ internal sealed class TrackViewport : Control
     private Point pressPosition;
     private Point previousPosition;
     private bool moved;
+    private IReadOnlyList<WireframePath> operations = [];
+    private bool selectingOperations;
 
     internal TrackView View { get; private set; } = TrackView.Perspective;
     internal TrackWireframe Scene { get; private set; } = TrackWireframe.Empty("Select a track with defined geometry.");
+
+    /// <summary>Uncommitted geometry shown during an editor drag. It never changes the camera or the committed scene.</summary>
+    internal TrackWireframe? PreviewScene { get; private set; }
+    internal TrackWireframe DisplayedScene => PreviewScene ?? Scene;
     internal WireframeSelection? Selection { get; private set; }
     internal Guid? ActiveRegionId { get; private set; }
-    internal ProjectedWireframe Projected => new(Scene, camera.ProjectTo(Bounds.Width, Bounds.Height), axisLength);
+    internal Guid? ActiveSegmentId { get; private set; }
+    internal ProjectedWireframe Projected => new(DisplayedScene, camera.ProjectTo(Bounds.Width, Bounds.Height), axisLength,
+        PreviewScene is null ? operations : []);
+
+    internal void SetPreviewScene(TrackWireframe? preview)
+    {
+        if (ReferenceEquals(PreviewScene, preview))
+        {
+            return;
+        }
+        PreviewScene = preview;
+        Redraw();
+    }
     internal bool HasGeometry => framePoints.Length > 0;
     internal event Action? StateChanged;
     internal event Action<Guid>? RegionPicked;
+    internal event Action<Guid?>? SegmentPicked;
+
+    internal void SetOperations(bool active, IReadOnlyList<WireframePath> paths, Guid? selected)
+    {
+        selectingOperations = active;
+        operations = paths;
+        ActiveSegmentId = selected;
+        if (Selection?.SegmentId is not null || active) { Selection = null; }
+        Redraw();
+    }
+
+    internal void SetActiveSegment(Guid? selected)
+    {
+        ActiveSegmentId = selected;
+        if (Selection?.SegmentId != selected) { Selection = null; }
+        Redraw();
+    }
 
     internal void SetActiveRegion(Guid? regionId)
     {
@@ -61,6 +98,7 @@ internal sealed class TrackViewport : Control
         trackId = document;
         bool needsFrame = changedTrack || !HasGeometry;
         Scene = scene;
+        PreviewScene = null;
         framePoints = scene.Paths.SelectMany(path => path.Vertices.Select(vertex => vertex.Position))
             .Concat(scene.ControlPoints.Select(point => point.Position)).ToArray();
         var centre = scene.Paths.Where(path => path.Kind == WireframePathKind.Heartline).ToArray();
@@ -126,7 +164,8 @@ internal sealed class TrackViewport : Control
         using (context.PushClip(area))
         {
             ProjectedWireframe frame = Projected;
-            foreach (ProjectedLine line in frame.Lines.OrderByDescending(line => (line.Start.Depth + line.End.Depth) / 2))
+            foreach (ProjectedLine line in frame.Lines.OrderBy(line => line.Selection.SegmentId.HasValue)
+                .ThenByDescending(line => (line.Start.Depth + line.End.Depth) / 2))
             {
                 context.DrawLine(IsHighlighted(line.Selection) ? SelectedPen : PenFor(line.Appearance),
                     Screen(line.Start), Screen(line.End));
@@ -219,8 +258,9 @@ internal sealed class TrackViewport : Control
         if (pressButton == MouseButton.Left && !moved && fromPress.Length <= 4 &&
             new Rect(Bounds.Size).Contains(position))
         {
-            Selection = Projected.Pick(position.X, position.Y, 7);
-            if (Selection?.RegionId is Guid regionId)
+            Selection = Projected.Pick(position.X, position.Y, 7, selectingOperations);
+            if (selectingOperations) { SegmentPicked?.Invoke(Selection?.SegmentId); }
+            else if (Selection?.RegionId is Guid regionId)
             {
                 RegionPicked?.Invoke(regionId);
             }
@@ -278,7 +318,8 @@ internal sealed class TrackViewport : Control
     private static Point Screen(ProjectedPoint point) => new(point.X, point.Y);
 
     private bool IsHighlighted(WireframeSelection item) => item == Selection ||
-        (item.Element is WireframeElement.Heartline or WireframeElement.RegionBoundary &&
+        (item.SegmentId is Guid segment && segment == ActiveSegmentId) ||
+        (!selectingOperations && item.Element is WireframeElement.Heartline or WireframeElement.RegionBoundary &&
             item.RegionId is Guid regionId && regionId == ActiveRegionId);
 
     private static IPen PenFor(WireframeElement element) => element switch
@@ -289,6 +330,7 @@ internal sealed class TrackViewport : Control
         WireframeElement.Forward => ForwardPen,
         WireframeElement.Left => SupportPen,
         WireframeElement.Up => UpPen,
+        WireframeElement.OperationalSegment => OperationalSegmentPen,
         _ => HeartlinePen
     };
 }

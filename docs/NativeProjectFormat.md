@@ -37,6 +37,19 @@ Version 2 keeps the same envelope, frames, Regions, and keyframes. The writer us
 | Transition | `type` is `"constant"`, `"linear"`, `"sine"`, `"cosine"`, `"quadratic"`, `"cubic"`, `"quartic"`, `"quintic"`, or `"plateau"`. For easings, `direction` is `"in"`, `"out"`, or `"inOut"`. A Constant takes only `type` and has equal adjacent key values. |
 | Plateau | A Plateau transition also requires a `plateau` object with `holdStart`, `holdEnd`, and `holdValue` fractions. |
 
-Both versions reject unknown or duplicate fields, unsupported types and versions, and input that fails timeline or reconstruction validation. Opening restores the authored functions and rebuilds the geometry and calculated results at the saved speed. [Mathematical Transition and Geometric Region conventions](MathematicalTransitionAuthoring.md)
+The project reader rejects unknown or duplicate fields, unsupported types and versions, and input that fails timeline or reconstruction validation. Opening restores the authored functions and rebuilds geometry and geometric readouts at the saved reconstruction speed. [Mathematical Transition and Geometric Region conventions](MathematicalTransitionAuthoring.md)
+
+## Version 3
+
+Version 3 extends version 2 with `track.operationalSegments`. The writer uses it for projects with at least one operational segment. Track-only projects continue to use the earliest version that represents their Regions and reconstruction anchor.
+
+| Location | Version 3 addition |
+| --- | --- |
+| `operationalSegments` | Array of disjoint intervals, written in increasing station order. |
+| Each segment | Unique nonempty GUID `id`, `startMetres` and `endMetres` on the authored heartline, and `type` (`"normalTrack"` or `"transport"`). |
+| `device` | Required on a Transport segment. Contains `type` (`"idealizedPoweredTransport"`), `entrySpeedMetresPerSecond`, optional `speedLimitMetresPerSecond`, and `accelerationRegions`. |
+| Each Acceleration Region | `keyframes` with `offsetMetres` from the segment start and `accelerationMetresPerSecondSquared`. An ordered `transitions` array uses the version 2 Transition schema. The first and last keys define the interval. |
+
+The loader validates device and interval settings along with the track. It restores the authored command timelines. Longitudinal motion is calculated on request in Track Segment Settings. [Operational track segment and device conventions](OperationsAuthoring.md)
 
 Save writes and flushes a new file in the destination directory before renaming it over the destination. This keeps the existing file in place if preparing the replacement fails. The desktop picker requires a filesystem path so the replacement can take place in the same directory.

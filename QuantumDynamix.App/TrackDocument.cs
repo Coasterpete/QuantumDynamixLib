@@ -25,4 +25,8 @@ internal sealed class TrackDocument(string name, TrackWireframeSource? geometry 
         return geometry?.Sample(Timeline.Regions, stationIntervals)
             ?? TrackWireframe.Empty("Append a Region to generate the track geometry.");
     }
+
+    /// <summary>Samples uncommitted Regions for a live viewport preview, or returns null when the track has no geometry.</summary>
+    internal TrackWireframe? SamplePreview(TrackEditPreview preview) =>
+        preview.Geometry?.DisplayScene ?? geometry?.Sample(preview.Regions, RegionTrackGeometry.DisplayIntervals);
 }

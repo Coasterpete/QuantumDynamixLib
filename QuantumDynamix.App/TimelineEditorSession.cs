@@ -20,10 +20,13 @@ internal sealed record AuthoredRegion(Guid Id, string Name, Region Definition,
 
 internal readonly record struct TrackReconstructionAnchor(double Station, CurveFrame Frame, double? GeometricHeadingRadians = null);
 
-internal sealed class TimelineEditorSession
+internal sealed partial class TimelineEditorSession
 {
     private sealed record Snapshot(AuthoredRegion[] Regions, double MinimumValue, double MaximumValue,
-        RegionTrackGeometry? Geometry = null, TrackReconstructionAnchor? Anchor = null);
+        RegionTrackGeometry? Geometry = null, TrackReconstructionAnchor? Anchor = null)
+    {
+        internal IReadOnlyList<OperationalSegment> Segments { get; init; } = [];
+    }
 
     private readonly Stack<Snapshot> undo = new();
     private readonly Stack<Snapshot> redo = new();
@@ -44,12 +47,15 @@ internal sealed class TimelineEditorSession
     }
 
     internal static TimelineEditorSession RestoreAuthored(CurveFrame initialFrame, double speed,
-        AuthoredRegion[] regions, TrackReconstructionAnchor? anchor)
+        AuthoredRegion[] regions, TrackReconstructionAnchor? anchor, OperationalSegment[]? segments = null)
     {
         var session = new TimelineEditorSession(initialFrame, speed);
         string? error = session.BuildSnapshot(regions, anchor, out Snapshot? snapshot);
         if (error is not null) { throw new InvalidOperationException(error); }
         session.current = snapshot!;
+        if (segments is { Length: > 0 } && session.ReplaceSegments(segments) is { } problem)
+        { throw new InvalidOperationException(problem); }
+        session.undo.Clear();
         session.MarkSaved();
         return session;
     }
@@ -190,6 +196,23 @@ internal sealed class TimelineEditorSession
         return error ?? Commit(updated);
     }
 
+    /// <summary>Moves a Region's end station. Following Regions keep their lengths and move with it, as with a length edit.</summary>
+    internal string? MoveRegionEnd(int index, double end)
+    {
+        AuthoredRegion region = Regions[index];
+        if (!double.IsFinite(end) || end <= region.Definition.Start)
+        {
+            return "Keep the Region end after its start station.";
+        }
+        if (end == region.Definition.End) { return null; }
+
+        var updated = (AuthoredRegion[])current.Regions.Clone();
+        string? error = Reposition(region, region.Definition.Start, end, out updated[index]);
+        if (error is not null) { return error; }
+        error = RepositionFollowing(updated, index + 1);
+        return error ?? Commit(updated);
+    }
+
     internal string? DeleteRegion(int index)
     {
         AuthoredRegion[] updated = [.. Regions.Take(index), .. Regions.Skip(index + 1)];
@@ -295,17 +318,30 @@ internal sealed class TimelineEditorSession
             ? preview : null;
     }
 
+    /// <summary>Whether a keyframe can change on the graph or in the keyframe fields, and which coordinates may change.</summary>
+    /// <remarks>Region endpoint stations belong to the Region boundary. Only an editable endpoint value can change.</remarks>
+    internal KeyframeDragMode KeyframeEditMode(int region, string channel, int index)
+    {
+        int count = Regions[region].Keyframes[channel].Length;
+        if (index < 0 || index >= count) { return KeyframeDragMode.None; }
+        if (index > 0 && index < count - 1) { return KeyframeDragMode.Free; }
+        return CanEditTransitionEndpoint(region, index, count) ? KeyframeDragMode.ValueOnly : KeyframeDragMode.None;
+    }
+
     private string? PrepareMove(int region, string channel, int index, TimelineKeyframe key, out TimelineKeyframe[]? updated)
     {
         updated = null;
         TimelineKeyframe[] keys = Regions[region].Keyframes[channel];
-        if (index <= 0 || index >= keys.Length - 1)
+        switch (KeyframeEditMode(region, channel, index))
         {
-            return "Select an interior keyframe to move. Region endpoints are fixed.";
-        }
-        if (!(key.Coordinate > keys[index - 1].Coordinate && key.Coordinate < keys[index + 1].Coordinate))
-        {
-            return "Keep the station strictly between its neighboring keyframes.";
+            case KeyframeDragMode.None when index >= 0 && index < keys.Length && SupportsForceRegions:
+                return "The values at adjoining Region boundaries are linked.";
+            case KeyframeDragMode.None:
+                return "Select an interior keyframe to move. Region endpoints are fixed.";
+            case KeyframeDragMode.ValueOnly when key.Coordinate != keys[index].Coordinate:
+                return "A Region endpoint keeps its station. Drag the Region boundary to change the Region length.";
+            case KeyframeDragMode.Free when !(key.Coordinate > keys[index - 1].Coordinate && key.Coordinate < keys[index + 1].Coordinate):
+                return "Keep the station strictly between its neighboring keyframes.";
         }
         if (key == keys[index])
         {
@@ -558,6 +594,7 @@ internal sealed class TimelineEditorSession
 
     private string? Commit(AuthoredRegion[] updated)
     {
+        if (ValidateSegmentStations(current.Segments, updated) is { } invalid) { return invalid; }
         TrackReconstructionAnchor? anchor = null;
         if (SupportsForceRegions && updated.Length > 0)
         {
@@ -596,12 +633,24 @@ internal sealed class TimelineEditorSession
             }
         }
 
+        if (drafting)
+        {
+            // A draft stops after validation. Its geometry is built separately by BuildPreview.
+            draft = new(updated, anchor);
+            return null;
+        }
         string? problem = BuildSnapshot(updated, anchor, out Snapshot? snapshot);
         if (problem is not null) { return problem; }
+        CommitSnapshot(snapshot! with { Segments = current.Segments });
+        return null;
+    }
+
+    private void CommitSnapshot(Snapshot snapshot)
+    {
+        if (drafting) { throw new InvalidOperationException("A draft edit cannot change the session history."); }
         undo.Push(current);
         redo.Clear();
-        current = snapshot!;
-        return null;
+        current = snapshot;
     }
 
     private string? BuildSnapshot(AuthoredRegion[] updated, TrackReconstructionAnchor? anchor, out Snapshot? snapshot)

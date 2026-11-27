@@ -50,6 +50,15 @@
             <Setter Property="Padding" Value="3,3" />
             <Setter Property="FontSize" Value="11" />
         </Style>
+        <Style Selector="UniformGrid#ProfileEditModes > Button.editor-action">
+            <Setter Property="Padding" Value="1,3" />
+            <Setter Property="FontSize" Value="10" />
+        </Style>
+        <!-- Marks typed Transition values that are not applied yet, without moving the layout under the pointer. -->
+        <Style Selector="Button.editor-action.pending">
+            <Setter Property="Foreground" Value="{StaticResource QuantumRed}" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
         <Style Selector="Button.editor-action.region-action">
             <Setter Property="Padding" Value="1,3" />
             <Setter Property="FontSize" Value="8.5" />
@@ -82,6 +91,22 @@
             <Setter Property="Padding" Value="4,2" />
             <Setter Property="FontSize" Value="11" />
         </Style>
+        <Style Selector="TextBlock.new-region">
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="1,0,5,0" />
+        </Style>
+        <Style Selector="TextBox.new-region">
+            <Setter Property="MinHeight" Value="21" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Padding" Value="3,1" />
+        </Style>
+        <Style Selector="ComboBox.new-region">
+            <Setter Property="MinHeight" Value="21" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Padding" Value="4,1" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
     </UserControl.Styles>
 
     <Border BorderBrush="{StaticResource PanelBorder}" BorderThickness="1.5">
@@ -106,7 +131,7 @@
                         <MenuItem x:Name="UndoMenu" Header="_Undo" Click="Undo" IsEnabled="False" />
                         <MenuItem x:Name="RedoMenu" Header="_Redo" Click="Redo" IsEnabled="False" />
                         <Separator />
-                        <MenuItem x:Name="RegionPropertiesMenu" Header="Region Properties…" Click="EditRegion" IsEnabled="False" />
+                        <MenuItem x:Name="RegionPropertiesMenu" Header="Region Properties" Click="EditRegion" IsEnabled="False" />
                         <MenuItem x:Name="AddChannelMenu" Header="Add Channel…" Click="AddChannel" IsEnabled="False" />
                     </MenuItem>
                     <MenuItem x:Name="GraphViewMenu" Header="_View">
@@ -145,23 +170,57 @@
                         <Button Classes="command" IsEnabled="False"><TextBlock Text="Coaster Properties..." TextWrapping="Wrap" /></Button>
                         <Button Classes="command" IsEnabled="False"><TextBlock Text="Mirror Track..." TextWrapping="Wrap" /></Button>
                         <Button Classes="command" IsEnabled="False"><TextBlock Text="Mirror Track..." TextWrapping="Wrap" /></Button>
-                        <Button Classes="command" IsEnabled="False"><TextBlock Text="Operations..." TextWrapping="Wrap" /></Button>
+                        <Button x:Name="OperationsButton" Classes="command" Click="ToggleOperations" IsEnabled="False"><TextBlock Text="Operations..." TextWrapping="Wrap" /></Button>
                     </StackPanel>
                 </ScrollViewer>
 
-                <Border Grid.Row="1" Margin="27,3" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" Padding="3">
-                    <Grid RowDefinitions="Auto,*,Auto,Auto">
+                <Border x:Name="RegionListPanel" Grid.Row="1" Margin="27,3" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" Padding="3">
+                    <Grid RowDefinitions="Auto,*,Auto,Auto,Auto">
                         <TextBlock Text="Region List" HorizontalAlignment="Center" Margin="0,6" FontSize="11" />
                         <ListBox x:Name="RegionList" Grid.Row="1" Classes="compact" SelectionChanged="SelectRegion"
                                  AutomationProperties.Name="Region List" />
                         <TextBlock x:Name="RegionExtent" Grid.Row="2" IsVisible="False" Margin="4,2" FontSize="10"
                                    TextTrimming="CharacterEllipsis" />
-                        <UniformGrid Grid.Row="3" Columns="2">
+                        <Grid x:Name="NewRegionPanel" Grid.Row="3" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto"
+                              RowSpacing="2" Margin="2,3,2,1" IsVisible="False">
+                            <TextBlock x:Name="NewRegionModeLabel" Text="Type" Classes="new-region" />
+                            <ComboBox x:Name="NewRegionMode" Grid.Column="1" Grid.ColumnSpan="2" Classes="new-region"
+                                      AutomationProperties.Name="New Region type" />
+                            <TextBlock Grid.Row="1" Text="Length" Classes="new-region" />
+                            <TextBox x:Name="NewRegionLength" Grid.Row="1" Grid.Column="1" Classes="key-input new-region"
+                                     AutomationProperties.Name="New Region length in metres" KeyDown="AppendRegionOnEnter" />
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="m" Classes="new-region" Margin="3,0,0,0" />
+                            <TextBlock x:Name="FirstStationLabel" Grid.Row="2" Text="Start" Classes="new-region" />
+                            <TextBox x:Name="FirstStationInput" Grid.Row="2" Grid.Column="1" Classes="key-input new-region" Text="0"
+                                     AutomationProperties.Name="First Region start station in metres" KeyDown="AppendRegionOnEnter" />
+                            <TextBlock x:Name="FirstStationUnit" Grid.Row="2" Grid.Column="2" Text="m" Classes="new-region" Margin="3,0,0,0" />
+                        </Grid>
+                        <UniformGrid Grid.Row="4" Columns="2">
                             <Button x:Name="AppendRegionButton" Classes="editor-action region-action" Click="AppendRegion" IsEnabled="False" HorizontalAlignment="Stretch"><TextBlock Text="Append Region" TextWrapping="Wrap" /></Button>
                             <Button x:Name="PrependRegionButton" Classes="editor-action region-action" Click="PrependRegion" IsEnabled="False" HorizontalAlignment="Stretch"><TextBlock Text="Prepend Region" TextWrapping="Wrap" /></Button>
                             <Button Classes="editor-action region-action" IsEnabled="False" HorizontalAlignment="Stretch" AutomationProperties.HelpText="Pending implementation"><TextBlock Text="Mirror Region" TextWrapping="Wrap" /></Button>
                             <Button x:Name="DeleteRegionButton" Classes="editor-action region-action" Click="DeleteRegion" IsEnabled="False" HorizontalAlignment="Stretch"><TextBlock Text="Delete Region" TextWrapping="Wrap" /></Button>
                         </UniformGrid>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="OperationsPanel" Grid.Row="1" Margin="27,3" BorderBrush="{StaticResource PanelBorder}"
+                        BorderThickness="1" Padding="3" IsVisible="False">
+                    <Grid RowDefinitions="Auto,*,Auto">
+                        <TextBlock Text="Track Segments" HorizontalAlignment="Center" Margin="0,6" FontSize="11" />
+                        <ListBox x:Name="SegmentList" Grid.Row="1" Classes="compact" SelectionChanged="SelectSegment"
+                                 AutomationProperties.Name="Operational Track Segments" />
+                        <StackPanel Grid.Row="2">
+                            <Button x:Name="AddSegmentButton" Classes="editor-action" Click="AddSegment" HorizontalAlignment="Stretch">
+                                <TextBlock Text="Add Track Segment…" TextWrapping="Wrap" />
+                            </Button>
+                            <Button x:Name="SegmentSettingsButton" Classes="editor-action" Click="EditSegment" HorizontalAlignment="Stretch">
+                                <TextBlock Text="Track Segment Settings…" TextWrapping="Wrap" />
+                            </Button>
+                            <Button x:Name="RemoveSegmentButton" Classes="editor-action" Click="RemoveSegment" HorizontalAlignment="Stretch">
+                                <TextBlock Text="Remove Track Segment" TextWrapping="Wrap" />
+                            </Button>
+                        </StackPanel>
                     </Grid>
                 </Border>
             </Grid>
@@ -271,10 +330,30 @@
             <ScrollViewer x:Name="KeyframePanel" Grid.Row="4" Grid.Column="2" VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled" IsVisible="False">
                 <StackPanel Margin="9,10,9,5" Spacing="4">
-                    <UniformGrid x:Name="ProfileEditModes" Columns="2" IsVisible="False">
+                    <UniformGrid x:Name="ProfileEditModes" Columns="3" IsVisible="False">
+                        <Button x:Name="RegionInspectorButton" Classes="editor-action" Content="Region" Click="ShowRegionFields" />
                         <Button x:Name="TransitionsButton" Classes="editor-action" Content="Transitions" Click="ShowTransitions" />
                         <Button x:Name="KeyframesButton" Classes="editor-action" Content="Keyframes" Click="ShowKeyframes" />
                     </UniformGrid>
+                    <StackPanel x:Name="RegionFields" Spacing="4" IsVisible="False">
+                        <TextBlock x:Name="RegionSummary" FontSize="10" TextWrapping="Wrap" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
+                            <StackPanel>
+                                <TextBlock Text="Name" FontSize="11" />
+                                <TextBox x:Name="RegionNameInput" Classes="key-input" AutomationProperties.Name="Selected Region name"
+                                         KeyDown="ApplyRegionOnEnter" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Length (m)" FontSize="11" />
+                                <TextBox x:Name="RegionLengthInput" Classes="key-input" AutomationProperties.Name="Selected Region length in metres"
+                                         KeyDown="ApplyRegionOnEnter" />
+                            </StackPanel>
+                        </Grid>
+                        <Button x:Name="ApplyRegionButton" Classes="editor-action" Content="Apply" Click="ApplyRegionFields"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                        <TextBlock FontSize="10" Foreground="#A4A4A4" TextWrapping="Wrap"
+                                   Text="Drag a Region's end boundary in the Transition Editor to change its length." />
+                    </StackPanel>
                     <StackPanel x:Name="KeyframeFields" Spacing="4">
                         <TextBlock x:Name="KeyframesHeading" Text="Keyframes" FontWeight="Bold" FontSize="13" />
                         <ListBox x:Name="KeyframeList" Classes="compact" SelectionChanged="SelectKeyframe" MaxHeight="106"
@@ -311,35 +390,38 @@
                             <StackPanel Grid.Column="1">
                                 <TextBlock Text="Direction" FontSize="11" />
                                 <ComboBox x:Name="TransitionDirection" HorizontalAlignment="Stretch" FontSize="11"
-                                          AutomationProperties.Name="Transition direction" />
+                                          AutomationProperties.Name="Transition direction" SelectionChanged="SelectTransitionDirection" />
                             </StackPanel>
                         </Grid>
+                        <TextBlock x:Name="TransitionShapeNote" FontSize="10" TextWrapping="Wrap" IsVisible="False"
+                                   AutomationProperties.LiveSetting="Polite"
+                                   Text="Start and end values are equal, so this Transition is flat for every function. Change the start or end value to shape it." />
                         <StackPanel>
                             <TextBlock Text="Length (m)" FontSize="11" />
-                            <TextBox x:Name="TransitionLength" Classes="key-input" AutomationProperties.Name="Transition length in metres" />
+                            <TextBox x:Name="TransitionLength" Classes="key-input transition-value" AutomationProperties.Name="Transition length in metres" />
                         </StackPanel>
                         <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
                             <StackPanel>
                                 <TextBlock Text="Start value" FontSize="11" />
-                                <TextBox x:Name="TransitionStart" Classes="key-input" AutomationProperties.Name="Transition start value" />
+                                <TextBox x:Name="TransitionStart" Classes="key-input transition-value" AutomationProperties.Name="Transition start value" />
                             </StackPanel>
                             <StackPanel Grid.Column="1">
                                 <TextBlock Text="End value" FontSize="11" />
-                                <TextBox x:Name="TransitionEnd" Classes="key-input" AutomationProperties.Name="Transition end value" />
+                                <TextBox x:Name="TransitionEnd" Classes="key-input transition-value" AutomationProperties.Name="Transition end value" />
                             </StackPanel>
                         </Grid>
                         <Grid x:Name="PlateauFields" ColumnDefinitions="*,*,*" ColumnSpacing="4" IsVisible="False">
                             <StackPanel>
                                 <TextBlock Text="Hold start" FontSize="10" />
-                                <TextBox x:Name="HoldStart" Classes="key-input" AutomationProperties.Name="Plateau hold start fraction" />
+                                <TextBox x:Name="HoldStart" Classes="key-input transition-value" AutomationProperties.Name="Plateau hold start fraction" />
                             </StackPanel>
                             <StackPanel Grid.Column="1">
                                 <TextBlock Text="Hold end" FontSize="10" />
-                                <TextBox x:Name="HoldEnd" Classes="key-input" AutomationProperties.Name="Plateau hold end fraction" />
+                                <TextBox x:Name="HoldEnd" Classes="key-input transition-value" AutomationProperties.Name="Plateau hold end fraction" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="Hold value" FontSize="10" />
-                                <TextBox x:Name="HoldValue" Classes="key-input" AutomationProperties.Name="Plateau hold value fraction" />
+                                <TextBox x:Name="HoldValue" Classes="key-input transition-value" AutomationProperties.Name="Plateau hold value fraction" />
                             </StackPanel>
                         </Grid>
                         <UniformGrid Columns="2">

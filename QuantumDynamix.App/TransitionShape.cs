@@ -14,6 +14,12 @@ internal readonly record struct TransitionShape(EasingKind? Kind, EasingDirectio
 
     internal string Name => Kind?.ToString() ?? "Constant";
 
+    /// <summary>The function and, where it changes the shape, its direction.</summary>
+    internal string Description => Kind is null or EasingKind.Linear ? Name : $"{Name} {Direction}";
+
+    /// <summary>True when the span's endpoint values are equal, so y₀ + (y₁ − y₀)E(u) is flat for every function.</summary>
+    internal static bool IsFlat(TimelineKeyframe start, TimelineKeyframe end) => start.Value == end.Value;
+
     internal static TransitionShape FromSegment(IScalarFunction segment)
     {
         if (segment is FunctionSegment span)

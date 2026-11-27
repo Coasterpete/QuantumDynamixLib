@@ -19,8 +19,10 @@ internal sealed partial class TransitionGraph : Control
     private static readonly ImmutablePen InnerBoundary = new(new ImmutableSolidColorBrush(Color.Parse("#BBBBBB")), 1,
         new ImmutableDashStyle([4, 4], 0));
     private static readonly ImmutablePen Ruler = new(new ImmutableSolidColorBrush(Color.Parse("#9BA9B8")), 1);
-    private static readonly ImmutablePen SelectionLine = new(new ImmutableSolidColorBrush(Color.Parse("#FF0808")), 1.5);
+    private static readonly ImmutableSolidColorBrush Highlight = new(Color.Parse("#FF0808"));
+    private static readonly ImmutablePen SelectionLine = new(Highlight, 1.5);
     private static readonly ImmutablePen SelectedCurve = new(Brushes.White, 1);
+    private static readonly IBrush LabelBackground = new ImmutableSolidColorBrush(Color.Parse("#E6000000"));
     private static readonly Typeface GraphType = new("Cascadia Mono, Consolas, DejaVu Sans Mono, monospace");
     private static readonly string[] ExampleChannels = ["Blue", "Red", "Green", "Purple", "Gold"];
     private static readonly ImmutablePen[] CurvePens =
@@ -40,12 +42,15 @@ internal sealed partial class TransitionGraph : Control
     private IReadOnlyList<TimelineKeyframe> keys = [];
     private double? viewStart;
     private double? viewEnd;
+    private double? domainStart;
+    private double? domainEnd;
     private double minimumValue;
     private double maximumValue = 1;
     private string? editChannel;
     private int activeRegion = -1;
     private int selectedKey = -1;
     private int selectedTransition = -1;
+    private string? selectedTransitionLabel;
 
     internal TransitionGraph(IReadOnlyList<Region> regions,
         Func<GraphPosition, TransitionDragTarget?>? resolveDragTarget = null)
@@ -59,14 +64,19 @@ internal sealed partial class TransitionGraph : Control
     internal event Action<TransitionEdit>? EditProposed;
     internal event Action<TransitionEdit?>? PreviewChanged;
     internal event Action<int>? KeyframeSelected;
-    internal event Action<int>? TransitionSelected;
+    /// <summary>A curve was clicked: Region index, channel, and the Transition (segment) index under the pointer.</summary>
+    internal event Action<int, string, int>? CurveSelected;
+    internal event Action<GraphBoundary>? BoundarySelected;
     internal event Action<int>? RegionSelected;
     internal event Action? InvalidDrag;
     internal IReadOnlyList<string> Channels => channels;
     internal IReadOnlyList<Region> Regions => regions;
     internal IReadOnlyList<Region> DisplayedRegions => previewRegions ?? regions;
     internal int SelectedRegion => activeRegion;
+    internal int SelectedKeyframe => selectedKey;
     internal string RegionName(int index) => regionNames?[index] ?? $"Transition {index + 1}";
+    private double DomainStart => domainStart ?? (regions.Count == 0 ? 0 : regions[0].Start);
+    private double DomainEnd => domainEnd ?? (regions.Count == 0 ? 1 : regions[^1].End);
 
     internal TransitionGraphViewport Viewport
     {
@@ -75,9 +85,17 @@ internal sealed partial class TransitionGraph : Control
             double inset = System.Math.Clamp(Bounds.Width * .042, 22, 56);
             var plot = new Rect(inset, 21, System.Math.Max(0, Bounds.Width - 2 * inset),
                 System.Math.Max(0, Bounds.Height - 68));
-            return new(plot, viewStart ?? (regions.Count == 0 ? 0 : regions[0].Start),
-                viewEnd ?? (regions.Count == 0 ? 1 : regions[^1].End), minimumValue, maximumValue);
+            return new(plot, viewStart ?? DomainStart, viewEnd ?? DomainEnd, minimumValue, maximumValue);
         }
+    }
+
+    /// <summary>Shows a fixed distance domain, such as a whole operational segment, instead of the Regions' extent.</summary>
+    internal void SetDomain(double? start, double? end)
+    {
+        if (start == domainStart && end == domainEnd) { return; }
+        domainStart = start;
+        domainEnd = end;
+        Fit();
     }
 
     internal IBrush ChannelBrush(string channel) => ChannelPen(channel).Brush!;
@@ -102,11 +120,15 @@ internal sealed partial class TransitionGraph : Control
         InvalidateVisual();
     }
 
-    internal void SelectTransition(int index)
+    /// <summary>Highlights one Transition of the editable profile and labels it with its function.</summary>
+    internal void SelectTransition(int index, string? label = null)
     {
         selectedTransition = index;
+        selectedTransitionLabel = index >= 0 ? label : null;
         InvalidateVisual();
     }
+
+    internal string? SelectedTransitionLabel => selectedTransition >= 0 ? selectedTransitionLabel : null;
 
     internal bool IsChannelVisible(string channel) => !hiddenChannels.Contains(channel);
 
@@ -194,8 +216,8 @@ internal sealed partial class TransitionGraph : Control
 
     private void SetView(double center, double requestedSpan)
     {
-        double start = regions[0].Start;
-        double end = regions[^1].End;
+        double start = DomainStart;
+        double end = DomainEnd;
         double fullSpan = end - start;
         // Limit screen magnification to a finite window without changing any authored station.
         double span = System.Math.Clamp(requestedSpan, fullSpan / 128, fullSpan);
@@ -230,6 +252,8 @@ internal sealed partial class TransitionGraph : Control
         DrawGrid(context, viewport.Plot);
         if (regions.Count == 0)
         {
+            // A fixed domain, such as an operational segment, still shows its distance scale.
+            if (domainStart.HasValue && domainEnd.HasValue) { DrawRuler(context, viewport); }
             return;
         }
 
@@ -258,6 +282,42 @@ internal sealed partial class TransitionGraph : Control
         DrawRuler(context, viewport);
         DrawSelectedTransition(context, viewport);
         DrawKeyframes(context, viewport);
+        DrawDragFeedback(context, viewport);
+    }
+
+    private void DrawDragFeedback(DrawingContext context, TransitionGraphViewport viewport)
+    {
+        Rect plot = viewport.Plot;
+        GraphBoundary? highlighted = activeBoundary ?? (dragPointer is null ? hoverBoundary : null);
+        if (highlighted is { } boundary)
+        {
+            double station = edit.Candidate is TransitionEdit.Boundary moved ? moved.Proposed : boundary.Station;
+            double x = viewport.ProjectDistance(station);
+            if (x >= plot.Left - 1 && x <= plot.Right + 1)
+            {
+                context.DrawLine(SelectionLine, new Point(x, plot.Top), new Point(x, plot.Bottom));
+                context.DrawRectangle(Highlight, null, new Rect(x - 4, plot.Top - 4, 8, 8), 1, 1);
+                if (IsDragging)
+                {
+                    DrawTag(context, $"{station.ToString("G6", CultureInfo.CurrentCulture)} m", x, plot.Top + 4, plot);
+                }
+            }
+        }
+        if (IsDragging && edit.Candidate is TransitionEdit.Keyframe key)
+        {
+            Point point = viewport.Project(new(key.Proposed.Coordinate, key.Proposed.Value));
+            string text = $"{key.Proposed.Coordinate.ToString("G6", CultureInfo.CurrentCulture)} m · " +
+                key.Proposed.Value.ToString("G6", CultureInfo.CurrentCulture);
+            DrawTag(context, text, point.X, System.Math.Clamp(point.Y - 22, plot.Top, plot.Bottom - 14), plot);
+        }
+    }
+
+    private static void DrawTag(DrawingContext context, string text, double x, double y, Rect plot)
+    {
+        var label = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, GraphType, 11, Brushes.White);
+        double left = System.Math.Clamp(x + 6, plot.Left, System.Math.Max(plot.Left, plot.Right - label.Width - 4));
+        context.FillRectangle(LabelBackground, new Rect(left - 2, y - 1, label.Width + 4, label.Height + 2));
+        context.DrawText(label, new Point(left, y));
     }
 
     private void DrawSelectedTransition(DrawingContext context, TransitionGraphViewport viewport)
@@ -282,11 +342,18 @@ internal sealed partial class TransitionGraph : Control
             }
         }
         context.DrawLine(ChannelPen(channel), extent.BottomLeft, extent.BottomRight);
+        if (selectedTransitionLabel is { } label && !IsDragging)
+        {
+            // Name the committed function on the selected span so the active choice is visible on the graph.
+            DrawTag(context, label, left - 6, plot.Top + 4, plot);
+        }
     }
 
     private void DrawKeyframes(DrawingContext context, TransitionGraphViewport viewport)
     {
-        if (editChannel is null || hiddenChannels.Contains(editChannel))
+        // During a boundary drag the committed keyframe stations no longer match the previewed curves.
+        if (editChannel is null || hiddenChannels.Contains(editChannel) ||
+            (IsDragging && edit.Candidate is TransitionEdit.Boundary))
         {
             return;
         }
@@ -343,20 +410,22 @@ internal sealed partial class TransitionGraph : Control
             bool sharedStart = i > 0 && regions[i - 1].End == regions[i].Start;
             if (regions[i].Start >= viewport.Start && regions[i].Start <= viewport.End)
             {
-                DrawBoundary(context, viewport.Plot, left, isInterior: sharedStart);
+                DrawBoundary(context, viewport.Plot, left, isInterior: sharedStart,
+                    selected: i == activeRegion || (sharedStart && i - 1 == activeRegion));
             }
             bool sharedEnd = i + 1 < regions.Count && regions[i].End == regions[i + 1].Start;
             if (!sharedEnd && regions[i].End >= viewport.Start && regions[i].End <= viewport.End)
             {
-                DrawBoundary(context, viewport.Plot, right, isInterior: false);
+                DrawBoundary(context, viewport.Plot, right, isInterior: false, selected: i == activeRegion);
             }
         }
     }
 
-    private static void DrawBoundary(DrawingContext context, Rect plot, double x, bool isInterior)
+    private static void DrawBoundary(DrawingContext context, Rect plot, double x, bool isInterior, bool selected)
     {
         context.DrawLine(isInterior ? InnerBoundary : OuterBoundary, new Point(x, plot.Top), new Point(x, plot.Bottom));
-        context.DrawRectangle(Brushes.White, null, new Rect(x - 3.5, plot.Top - 3.5, 7, 7), 1, 1);
+        // The selected Region's boundary handles use the selection color shown under its title.
+        context.DrawRectangle(selected ? Highlight : Brushes.White, null, new Rect(x - 3.5, plot.Top - 3.5, 7, 7), 1, 1);
         if (isInterior)
         {
             // These shapes follow the reference artwork. Target selection is supplied independently.

@@ -1,0 +1,185 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="QuantumDynamix.App.TrackSegmentSettings"
+        Title="Track Segment Settings" Width="920" MinWidth="560" MinHeight="200" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" Background="Black" Foreground="White"
+        FontFamily="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" FontSize="12">
+    <Window.Styles>
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#C8C8C8" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+        </Style>
+        <Style Selector="TextBlock.section">
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{StaticResource QuantumRed}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="TextBox, ComboBox">
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="ComboBox">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Button">
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="9,2" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Bottom" />
+        </Style>
+        <Style Selector="Button.graph-nav">
+            <Setter Property="MinWidth" Value="28" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="14,12">
+        <!-- Track Segment Settings: the operational interval and its type. -->
+        <Grid ColumnDefinitions="110,110,*" ColumnSpacing="10">
+            <StackPanel>
+                <TextBlock Classes="label" Text="Start station (m)" />
+                <TextBox x:Name="SegmentStart" AutomationProperties.Name="Segment start station in metres" />
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+                <TextBlock Classes="label" Text="End station (m)" />
+                <TextBox x:Name="SegmentEnd" AutomationProperties.Name="Segment end station in metres" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" MaxWidth="260" HorizontalAlignment="Left" MinWidth="180">
+                <TextBlock Classes="label" Text="Segment Type" />
+                <ComboBox x:Name="SegmentType" AutomationProperties.Name="Segment Type" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Track Devices → Acceleration Region Editor. Shown only for a device-equipped segment type. -->
+        <StackPanel x:Name="DeviceFields" Grid.Row="1" Margin="0,12,0,0" IsVisible="False">
+            <Grid ColumnDefinitions="230,*" ColumnSpacing="14">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section" Text="Track Device · Idealized Powered Transport" />
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="Entry speed (m/s)" />
+                        <TextBox x:Name="EntrySpeed" AutomationProperties.Name="Entry speed in metres per second" />
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Classes="label" Text="Speed limit (m/s)" />
+                        <TextBox x:Name="SpeedLimit" PlaceholderText="Optional" AutomationProperties.Name="Speed limit in metres per second" />
+                    </StackPanel>
+                    <Button x:Name="CalculateButton" Content="Calculate Longitudinal Motion" Click="Calculate"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,6,0,0" />
+                    <TextBlock x:Name="MotionSummary" IsVisible="False" TextWrapping="Wrap" FontSize="11"
+                               AutomationProperties.LiveSetting="Polite" />
+                    <StackPanel x:Name="MotionReadouts" IsVisible="False" Spacing="4">
+                        <TextBlock Classes="label" Text="Sample offset (m)" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5">
+                            <TextBox x:Name="SampleOffset" AutomationProperties.Name="Motion sample offset in metres" />
+                            <Button Grid.Column="1" Content="Read Sample" Click="ReadSample" />
+                        </Grid>
+                        <TextBlock x:Name="MotionSample" TextWrapping="Wrap" FontSize="11" AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                </StackPanel>
+
+                <Border Grid.Column="1" BorderBrush="#5A5A5A" BorderThickness="1" Padding="10,8">
+                    <StackPanel Spacing="7">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6">
+                            <TextBlock Classes="section" Text="Acceleration Region Editor" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3">
+                                <Button x:Name="AccelerationUndo" Classes="graph-nav" Content="Undo" Click="UndoDraft" IsEnabled="False"
+                                        AutomationProperties.Name="Undo the last Acceleration Region edit in this window" />
+                                <Button x:Name="AccelerationRedo" Classes="graph-nav" Content="Redo" Click="RedoDraft" IsEnabled="False"
+                                        AutomationProperties.Name="Redo the Acceleration Region edit in this window" Margin="0,0,8,0" />
+                                <Button x:Name="AccelerationZoomOut" Classes="graph-nav" Content="−" Click="ZoomOutGraph"
+                                        AutomationProperties.Name="Zoom out the acceleration graph" />
+                                <Button x:Name="AccelerationZoomIn" Classes="graph-nav" Content="+" Click="ZoomInGraph"
+                                        AutomationProperties.Name="Zoom in the acceleration graph" />
+                                <Button x:Name="AccelerationFit" Classes="graph-nav" Content="Fit" Click="FitGraph"
+                                        AutomationProperties.Name="Fit the whole segment in the acceleration graph" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
+                            <ComboBox x:Name="AccelerationRegionList" AutomationProperties.Name="Device Acceleration Regions" />
+                            <Button Grid.Column="1" Content="Add Region" Click="AddRegion" />
+                            <Button x:Name="RemoveAccelerationRegion" Grid.Column="2" Content="Remove" Click="RemoveRegion" />
+                        </Grid>
+                        <Border BorderBrush="#3C3C3C" BorderThickness="1" ClipToBounds="True">
+                            <ContentControl x:Name="AccelerationGraphHost" Height="250" HorizontalContentAlignment="Stretch"
+                                            VerticalContentAlignment="Stretch" />
+                        </Border>
+                        <TextBlock x:Name="GraphHint" FontSize="10" Foreground="#A4A4A4" TextWrapping="Wrap"
+                                   Text="Drag keyframes or Acceleration Region boundaries. Click a curve to select its Transition. Drag empty space or scroll to pan and zoom." />
+                        <StackPanel x:Name="AccelerationFields" Spacing="7">
+                            <Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="6">
+                                <StackPanel>
+                                    <TextBlock Classes="label" Text="Start offset (m)" />
+                                    <TextBox x:Name="RegionStart" AutomationProperties.Name="Acceleration Region start offset in metres" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Classes="label" Text="End offset (m)" />
+                                    <TextBox x:Name="RegionEnd" AutomationProperties.Name="Acceleration Region end offset in metres" />
+                                </StackPanel>
+                                <Button Grid.Column="2" Content="Apply Offsets" Click="ApplyRegionOffsets" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
+                                <ComboBox x:Name="AccelerationTransitionList" AutomationProperties.Name="Acceleration Transitions" />
+                                <Button Grid.Column="1" Content="Split" Click="SplitTransition" />
+                                <Button x:Name="RemoveAccelerationTransition" Grid.Column="2" Content="Merge" Click="MergeTransition" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,*,*,1.3*,*" ColumnSpacing="6">
+                                <StackPanel>
+                                    <TextBlock Classes="label" Text="Length (m)" />
+                                    <TextBox x:Name="SpanLength" AutomationProperties.Name="Transition length in metres" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Classes="label" Text="Start (m/s²)" />
+                                    <TextBox x:Name="SpanStart" AutomationProperties.Name="Transition start acceleration" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Classes="label" Text="End (m/s²)" />
+                                    <TextBox x:Name="SpanEnd" AutomationProperties.Name="Transition end acceleration" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="3">
+                                    <TextBlock Classes="label" Text="Easing" />
+                                    <ComboBox x:Name="SpanKind" AutomationProperties.Name="Transition easing" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Classes="label" Text="Direction" />
+                                    <ComboBox x:Name="SpanDirection" AutomationProperties.Name="Easing direction" />
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock x:Name="SpanShapeNote" FontSize="11" TextWrapping="Wrap" IsVisible="False"
+                                       AutomationProperties.LiveSetting="Polite"
+                                       Text="Start and end accelerations are equal, so this Transition is flat for every easing. Change Start or End to shape it." />
+                            <Grid ColumnDefinitions="*,*,*,Auto" ColumnSpacing="6">
+                                <Grid x:Name="PlateauParameters" Grid.ColumnSpan="3" ColumnDefinitions="*,*,*" ColumnSpacing="6">
+                                    <StackPanel>
+                                        <TextBlock Classes="label" Text="Hold start fraction" />
+                                        <TextBox x:Name="PlateauStart" AutomationProperties.Name="Plateau start fraction" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Classes="label" Text="Hold end fraction" />
+                                        <TextBox x:Name="PlateauEnd" AutomationProperties.Name="Plateau end fraction" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Classes="label" Text="Hold value fraction" />
+                                        <TextBox x:Name="PlateauValue" AutomationProperties.Name="Plateau value fraction" />
+                                    </StackPanel>
+                                </Grid>
+                                <Button Grid.Column="3" Content="Apply Transition" Click="ApplyTransition" />
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </StackPanel>
+
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="0,12,0,0">
+            <TextBlock x:Name="SettingsStatus" Foreground="OrangeRed" TextWrapping="Wrap" VerticalAlignment="Center"
+                       AutomationProperties.LiveSetting="Polite" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Content="Cancel" IsCancel="True" Click="Cancel" />
+                <Button x:Name="ApplySegmentButton" Content="Apply Settings" Click="ApplySettings" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
