@@ -1,5 +1,14 @@
 # QuantumDynamixLib
-Official C# mathematics, geometry, and physics simulation library for QUANTUM DYNAMIX.
+
+QuantumDynamixLib is a standalone C#/.NET engineering SDK for coaster
+mathematics, track geometry, and physics simulation. This repository contains
+the SDK implementation, public API, documentation, and regression tests. The
+Release build below produces a compiled .NET assembly and companion XML API
+documentation. NuGet is an optional distribution format.
+
+QUANTUM DYNAMIX is the separately developed desktop application. Its repository
+will reference a versioned SDK DLL and call its public API. The application owns
+the editor, rendering, interaction, and project workflows.
 
 Licensed under the [MIT License](LICENSE).
 
@@ -14,6 +23,9 @@ Implemented in the current library:
   banking, and derived track-spine offsets.
 - **Profiles and fitting:** easing functions, time/distance timelines,
   feature-relative anchors, constrained fitting, and nondestructive smoothing.
+- **Heartline reconstruction:** integrate authored transverse acceleration or
+  specific-force profiles to reconstruct a numerical heartline. Spline fitting
+  includes verification at sampled stations.
 - **Physical rail geometry:** custom rail arrangements and cross-sections,
   section roll, surface queries, explicit spacing/gauge measurements, independent
   spine/rail distance maps, and geometric diagnostics.
@@ -33,10 +45,9 @@ Implemented in the current library:
   compression-only non-attractive damping, deformation-dependent wheel-load
   sharing, instantaneous forces and elastic energy, and a separate integration
   path using the existing projected implicit-midpoint joint solver.
+- **Supporting engineering tools:** prescribed longitudinal trajectories, route
+  block occupancy, support-member geometry, and rigid-body telemetry samples.
 
-Future application functionality, including FVD reconstruction, complete coaster
-simulation, friction, traction, braking mechanisms, suspension, automatic no-slip rolling,
-derailment modeling, train animation, rendering, and UI, is not implemented here.
 Rail geometry queries do not advance vehicles or apply contact forces. Contact stepping does not prescribe
 a spline-following trajectory.
 
@@ -67,36 +78,96 @@ controls, and regressions. Start with the short programs below, then use the
 [practical revolute-joint guide](docs/RevoluteJointExamples.md) for accumulated
 turns, paired axle torques, gyroscopic bearing reactions, and normal contact.
 
+## Planned functionality
+
+Future engineering work includes complete coaster simulation, tangential
+friction and traction, physical braking mechanisms, suspension, automatic
+no-slip rolling, and derailment modeling. Current reconstruction and prescribed
+motion models provide geometry and kinematics under authored inputs. Train
+animation, rendering, and UI are part of the separate application's development.
+
 ## Quick start
 
 Install a stable .NET 10 SDK compatible with `global.json` (currently selecting
 10.0.400 in the 10.0.4xx feature band; see [SDK and editor compatibility](#sdk-and-editor-compatibility)).
-From the repository root, build the library and run the MSTest suite:
+
+### Build the Release SDK
+
+Run this command from the SDK repository root to build the library project and
+generate its XML API documentation.
 
 ```powershell
-dotnet build QuantumDynamixLib.sln --configuration Debug
-dotnet test QuantumDynamixLib.sln --configuration Debug
+dotnet build QuantumDynamixLib.csproj --configuration Release -p:GenerateDocumentationFile=true
 ```
 
-To try the library from another .NET 10 project, these commands create a sibling
-console project and reference the core library directly:
+The default output folder is `bin/Release/net10.0/`. Use `QuantumDynamixLib.dll`
+from that folder as the runtime and compile-time assembly. Keep
+`QuantumDynamixLib.xml` alongside the DLL for editor IntelliSense. Include the
+[MIT license](LICENSE) when redistributing the artifacts.
+
+### Reference the compiled DLL
+
+For a scratch consumer, create a sibling .NET 10 console project from the SDK
+repository root.
 
 ```powershell
 dotnet new console --name QuantumDynamixDemo --output ../QuantumDynamixDemo --framework net10.0
-dotnet add ../QuantumDynamixDemo/QuantumDynamixDemo.csproj reference ./QuantumDynamixLib.csproj
 ```
 
-Replace the generated `Program.cs` with any one complete C# example below, then run
-it from the repository root:
+Copy the DLL and XML documentation into an `sdk/` folder beside the consumer's
+`.csproj`. Add this item group inside the consumer's `<Project>` element. Use the
+same form in the application project with its own path to the selected SDK
+release.
+
+```xml
+<ItemGroup>
+  <Reference Include="QuantumDynamixLib">
+    <HintPath>sdk/QuantumDynamixLib.dll</HintPath>
+    <Private>true</Private>
+  </Reference>
+</ItemGroup>
+```
+
+`HintPath` is relative to the consuming project file. `Private` copies the
+assembly to the consumer's build output. See the
+[MSBuild assembly reference documentation](https://learn.microsoft.com/en-us/visualstudio/msbuild/common-msbuild-project-items#reference).
+
+### Use the public API
+
+Import the namespace for the feature you need, such as `QuantumDynamix.Math`
+for `Vector3d`. Use the public types and members documented in IntelliSense,
+and check the engineering notes for units, coordinate frames, valid inputs,
+and numerical limits. To try an example, replace the demo's `Program.cs` with
+one of the complete programs below and run it from the SDK repository root.
 
 ```powershell
 dotnet run --project ../QuantumDynamixDemo/QuantumDynamixDemo.csproj
 ```
 
-For an existing project, use its `.csproj` path in the `dotnet add ... reference`
-command. Only `QuantumDynamixLib.csproj` is needed; the subsystem folders are part
-of that single assembly. See [Development infrastructure](#development-infrastructure)
-for Release builds, formatting checks, and editor setup.
+Record the SDK release used by each application build. When upgrading, review
+the public API and behavior changes, rebuild the consumer, and run its
+integration tests against the new DLL. SDK releases aim to preserve source and
+binary compatibility and documented numerical behavior.
+
+### Run the examples from source
+
+For the source-checkout workflow used in the companion example guides, create
+a fresh demo with the console command above and add a project reference.
+
+```powershell
+dotnet add ../QuantumDynamixDemo/QuantumDynamixDemo.csproj reference ./QuantumDynamixLib.csproj
+```
+
+The subsystem folders compile into the single library referenced by this demo.
+Use the same `dotnet run` command for the examples. For SDK development builds,
+formatting, and tests, see [Development infrastructure](#development-infrastructure).
+
+### Optional NuGet distribution
+
+To produce a package, pack `QuantumDynamixLib.csproj` in Release with XML
+documentation enabled and set `PackageVersion` to the intended release version.
+Consumers can use a versioned `PackageReference` when the resulting package is
+available from a configured feed. See the [.NET packing documentation](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-pack).
 
 ## Usage examples
 
@@ -492,13 +563,18 @@ geometry and timestep limitations and implement normal interaction only.
 
 ## Development infrastructure
 
-`QuantumDynamixLib.sln` contains one `net10.0` core class library and one MSTest
-project. The core project explicitly includes C# sources from the existing
-subsystem directories and excludes tests and generated files. Existing folders,
-including `QuantumDynamix.Splines/Curves` and `QuantumDynamix.Tests/Application`,
-retain their owner-defined organization. The core library has no external package
-dependencies or application-framework dependencies; test packages are confined to
-`QuantumDynamix.Tests`.
+`QuantumDynamixLib.csproj` builds a single `net10.0` assembly from the subsystem
+directories and excludes tests and generated files. The library depends on .NET's
+framework libraries. SDK regression testing is intended to run independently of
+the application and cover the SDK's numerical and public API contracts.
+
+The current solution also contains the existing Avalonia `QuantumDynamix.App`
+project and `QuantumDynamix.Tests`. The test project references both the SDK
+and the editor, and the editor uses a project reference to the SDK. Its
+milestones are documented in [Force-based Region authoring](docs/ForceRegionAuthoring.md),
+[Mathematical Transition authoring](docs/MathematicalTransitionAuthoring.md),
+[Operations authoring](docs/OperationsAuthoring.md), and
+[Native project format](docs/NativeProjectFormat.md).
 
 ### SDK and editor compatibility
 
@@ -528,7 +604,7 @@ extensions, both already installed on the setup machine. C# Dev Kit is also
 installed locally and is optional. C# files use the Microsoft C# formatter on
 save. Build, formatting verification, and test commands are available through
 **Tasks: Run Task**; **Ctrl+Shift+B** selects the Debug build task. Build and test
-tasks build and test the production library and its MSTest project.
+tasks use the current solution, including its MSTest project.
 
 ### Shared conventions
 
@@ -549,9 +625,9 @@ tasks build and test the production library and its MSTest project.
   permits shared VS Code settings, extension recommendations, and tasks.
 
 These shared properties apply to C# projects beneath the repository root.
-Individual project files can override them. Both current projects target
-`net10.0`; the test project references the single core library. The SDK chooses
-the default C# language version. Test execution uses MSTest through VSTest.
+Individual project files can override them. All current projects target
+`net10.0`. The .NET SDK chooses the default C# language version. Test execution
+uses MSTest through VSTest.
 
 ### Commands
 
@@ -564,7 +640,9 @@ dotnet --version
 dotnet sln QuantumDynamixLib.sln list
 ```
 
-Build and verify the implementation with:
+Build and verify the current solution with the commands below. Use the
+[library-project Release build](#build-the-release-sdk) to produce SDK artifacts
+independently of the editor.
 
 ```powershell
 # Build (also restores required packages).
