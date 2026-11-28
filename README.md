@@ -1,8 +1,14 @@
 # QuantumDynamixLib
 
-**QuantumDynamixLib** is the official C#/.NET mathematics, geometry, and physics
-library supporting **QUANTUM DYNAMIX**, a human-directed roller coaster engineering
-and simulation application.
+**QuantumDynamixLib** is a standalone C#/.NET engineering SDK for coaster
+mathematics, geometry, physics, and track authoring. The SDK's Release artifacts
+are a compiled DLL and companion XML API documentation. NuGet is an optional
+distribution format.
+
+**QUANTUM DYNAMIX** is planned as a separate desktop application that the
+project owner will develop in its own repository. The application will own the
+editor, rendering, interaction, and project workflows. It will reference a
+versioned SDK DLL and use the SDK's public API.
 
 Licensed under the [MIT License](LICENSE).
 
@@ -14,8 +20,70 @@ that band, and excludes prerelease SDKs. Both projects target `net10.0`.
 Run `dotnet --version` from the repository root to check the selected SDK.
 [.NET SDK selection](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json)
 
-From the repository root, build the solution and run the MSTest suite in Debug
-and Release. The build restores the required test packages.
+### Build the Release SDK
+
+From the repository root, build the library project and generate its XML API
+documentation.
+
+```powershell
+dotnet build QuantumDynamixLib.csproj --configuration Release -p:GenerateDocumentationFile=true
+```
+
+The default output is `bin/Release/net10.0/QuantumDynamixLib.dll`. Keep the
+matching `QuantumDynamixLib.xml` alongside it for IntelliSense. Include the MIT
+license when redistributing the artifacts. [MIT License](LICENSE)
+
+### Reference the compiled DLL
+
+Use a .NET 10 consumer project. To try the SDK in a scratch console app, create
+a sibling project from the SDK repository root.
+
+```powershell
+dotnet new console --name QuantumDynamixDemo --output ../QuantumDynamixDemo --framework net10.0
+```
+
+Copy the DLL and XML documentation to an `sdk/` folder beside the consumer's
+project file and add the following inside its `<Project>` element. For the
+separate application, use the same form with the path to the selected SDK
+release.
+
+```xml
+<ItemGroup>
+  <Reference Include="QuantumDynamixLib">
+    <HintPath>sdk/QuantumDynamixLib.dll</HintPath>
+    <Private>true</Private>
+  </Reference>
+</ItemGroup>
+```
+
+`HintPath` is relative to the consumer's project file. `Private` copies the
+assembly to the consumer's build output. [MSBuild assembly references](https://learn.microsoft.com/en-us/visualstudio/msbuild/common-msbuild-project-items#reference)
+
+### Use the public API
+
+Import the namespace for the feature you need, such as `QuantumDynamix.Math` for
+`Vector3d`. Use IntelliSense and the engineering guides to check public member
+signatures, units, coordinate frames, valid inputs, and numerical limits. To run
+a usage example, replace the demo's `Program.cs` with one of the complete
+programs and follow any shared setup instructions. [Usage examples](#usage-examples)
+
+```powershell
+dotnet run --project ../QuantumDynamixDemo/QuantumDynamixDemo.csproj
+```
+
+Record the SDK release used by each application build. When upgrading, review
+API and numerical behavior changes, rebuild the consumer, and run its
+integration tests with the new DLL.
+
+For optional NuGet distribution, pack `QuantumDynamixLib.csproj` in Release
+with XML documentation enabled and set `PackageVersion` to the intended
+release version. Consumers can reference that version with `PackageReference`
+when the package is available from a configured feed. [.NET packing documentation](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-pack)
+
+### Develop and test the SDK
+
+From the repository root, build the solution and run the independent SDK
+MSTest suite in Debug and Release. The build restores the required test packages.
 
 ```powershell
 dotnet build QuantumDynamixLib.sln --configuration Debug
@@ -24,19 +92,12 @@ dotnet build QuantumDynamixLib.sln --configuration Release
 dotnet test QuantumDynamixLib.sln --configuration Release
 ```
 
-To try the library, create a sibling console project and add a reference to the
-core project. Use the same project reference from an existing .NET 10 project.
+The companion engineering guides also support a source-checkout demo. Use the
+console-project and `dotnet run` commands above. For this workflow, start with a
+fresh demo and add the project reference below.
 
 ```powershell
-dotnet new console --name QuantumDynamixDemo --output ../QuantumDynamixDemo --framework net10.0
 dotnet add ../QuantumDynamixDemo/QuantumDynamixDemo.csproj reference ./QuantumDynamixLib.csproj
-```
-
-Replace the generated `Program.cs` with one of the [usage examples](#usage-examples),
-following its setup instructions, then run this command from the repository root.
-
-```powershell
-dotnet run --project ../QuantumDynamixDemo/QuantumDynamixDemo.csproj
 ```
 
 ## Current capabilities and source layout
